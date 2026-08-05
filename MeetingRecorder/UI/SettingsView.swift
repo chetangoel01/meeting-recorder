@@ -1,0 +1,98 @@
+import AppKit
+import SwiftUI
+
+struct SettingsView: View {
+    @ObservedObject var model: AppModel
+    @ObservedObject private var settings: AppSettings
+    @State private var apiKey = ""
+    @State private var keyMessage: String?
+
+    init(model: AppModel) {
+        self.model = model
+        settings = model.settings
+    }
+
+    var body: some View {
+        Form {
+            Section("OpenRouter") {
+                LabeledContent("API key") {
+                    SecureField(model.hasAPIKey ? "Saved in Keychain" : "sk-or-v1-…", text: $apiKey)
+                        .textFieldStyle(.roundedBorder)
+                }
+                HStack {
+                    Button(model.hasAPIKey ? "Replace key" : "Save key") {
+                        do {
+                            try model.saveAPIKey(apiKey)
+                            apiKey = ""
+                            keyMessage = "Saved securely in Keychain."
+                        } catch {
+                            keyMessage = error.localizedDescription
+                        }
+                    }
+                    .disabled(apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+
+                    if model.hasAPIKey {
+                        Label("Ready", systemImage: "checkmark.circle.fill")
+                            .foregroundStyle(.green)
+                    }
+                    Spacer()
+                }
+                if let keyMessage {
+                    Text(keyMessage)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                TextField("Transcription model", text: $settings.transcriptionModel)
+                    .textFieldStyle(.roundedBorder)
+            }
+
+            Section("Recording access") {
+                permissionRow("Microphone", authorized: model.microphoneAuthorized)
+                permissionRow("Screen and system audio", authorized: model.screenAuthorized)
+                Button("Grant recording access") {
+                    Task { await model.requestCapturePermissions() }
+                }
+                Text("macOS may require the app to restart after screen and system audio access is granted.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            Section("Reliability") {
+                Toggle("Launch at login", isOn: Binding(
+                    get: { settings.launchAtLogin },
+                    set: { model.setLaunchAtLogin($0) }
+                ))
+                Toggle("Use calendar meeting links as a backup", isOn: $settings.calendarBackup)
+                    .onChange(of: settings.calendarBackup) {
+                        Task { await model.enableCalendarBackup() }
+                    }
+                if settings.calendarBackup {
+                    permissionRow("Calendar", authorized: model.calendarAuthorized)
+                }
+            }
+
+            Section("Storage") {
+                Toggle("Keep audio after successful transcription", isOn: $settings.keepRecordings)
+                Button("Show transcript folder", action: model.revealTranscripts)
+                Text("Audio is always retained until transcription succeeds.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .formStyle(.grouped)
+        .padding(10)
+        .frame(width: 480, height: 520)
+    }
+
+    private func permissionRow(_ title: String, authorized: Bool) -> some View {
+        HStack {
+            Text(title)
+            Spacer()
+            Label(
+                authorized ? "Allowed" : "Needs access",
+                systemImage: authorized ? "checkmark.circle.fill" : "exclamationmark.circle.fill"
+            )
+            .foregroundStyle(authorized ? .green : .orange)
+        }
+    }
+}
