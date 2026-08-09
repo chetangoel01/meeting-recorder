@@ -17,6 +17,10 @@ The primary surface is a compact, opaque notch extension used during video calls
 
 Use recording red only for active capture and stop controls. Use blue only for the primary affirmative action. State is always reinforced with text and iconography.
 
+## App Icon
+
+The app icon is deliberately lighter than the recording overlay: one continuous sky-blue waveform wrapped around a coral recording dot on a warm cream superellipse. The mark stays to two shapes so it remains recognizable at menu and Dock sizes. Production sizes and the 1024-point source are kept together in `MeetingRecorder/Resources/Assets.xcassets/AppIcon.appiconset`.
+
 ## Typography
 
 Use the macOS system font. The notch uses 11 to 13 point labels with semibold emphasis for the active state or meeting source. Transcript history uses native body, headline, and caption styles so Dynamic Type and accessibility settings remain effective.
@@ -31,7 +35,7 @@ Use the macOS system font. The notch uses 11 to 13 point labels with semibold em
 ## Motion
 
 - State changes use a critically damped spring with approximately 0.32 second response and no overshoot.
-- The surface expands downward from the physical notch and collapses along the same path.
+- The surface expands horizontally into left and right wings around the physical notch. It moves upward along the same path when dismissed or tucked away.
 - Reduced Motion replaces geometry animation with a short opacity transition.
 - No looping decorative animation. The recording waveform reflects real microphone level when available; otherwise show a static recording mark.
 
@@ -39,15 +43,19 @@ Use the macOS system font. The notch uses 11 to 13 point labels with semibold em
 
 ### Idle notch
 
-A narrow extension beneath the camera housing. It remains visually quiet and can be clicked to expose manual recording and status.
+The idle surface matches the measured camera housing instead of extending beyond it. It should visually disappear into the physical notch; prompts and active states provide the expansion and controls.
 
 ### Meeting prompt
 
-Shows the detected client, the question “Record this meeting?”, a primary Record action, and a secondary Not a meeting action.
+Shows the detected client, the question “Record this meeting?”, a primary Record action, and a secondary Not a meeting action. Content occupies left and right wings beside the physical notch; the prompt extends no more than a few points below the menu-bar height.
 
 ### Recording state
 
-Shows an explicit recording label, elapsed time, source client, and Stop action. The visible state must remain present on every Space.
+Shows an explicit recording label, elapsed time, source client, a visible minimize chevron, microphone inclusion, call-audio inclusion, and Stop action. The tucked variant retains only the red recording light, microphone mute, and Stop; the light restores the full controls. The visible state must remain present on every Space. The app enters this state only after microphone and system-audio sample flow has been verified; a red recording indicator must never represent an unverified capture pipeline.
+
+### Notch gesture
+
+An upward drag tracks the pointer directly and returns with a critically damped spring when it does not cross the threshold. On a prompt, committing the gesture means Not a meeting and suppresses that audio session. During capture, it switches to the recording safety strip without changing the operation. During processing, it leaves a small clickable handle below the notch. Completion and error states dismiss through the same upward path.
 
 ### Processing state
 
@@ -55,4 +63,4 @@ Shows whether the app is saving audio or transcribing. Processing may continue a
 
 ### Error state
 
-Explains the failed step in plain language and offers one relevant recovery action. Locally retained audio is stated explicitly.
+Explains the failed step in plain language and offers one relevant recovery action. Locally retained audio is stated explicitly. Capture-health and saved-duration failures take precedence over a misleading success state.

@@ -22,7 +22,7 @@ final class NotchPanelController {
     }
 
     func show() {
-        updateFrame(for: model.phase, animated: false)
+        updateFrame(for: model.phase, collapsed: model.notchCollapsed, animated: false)
         panel.orderFrontRegardless()
     }
 
@@ -50,11 +50,13 @@ final class NotchPanelController {
     }
 
     private func observeModel() {
-        model.$phase
-            .removeDuplicates()
+        Publishers.CombineLatest(
+            model.$phase.removeDuplicates(),
+            model.$notchCollapsed.removeDuplicates()
+        )
             .receive(on: RunLoop.main)
-            .sink { [weak self] phase in
-                self?.updateFrame(for: phase, animated: true)
+            .sink { [weak self] phase, collapsed in
+                self?.updateFrame(for: phase, collapsed: collapsed, animated: true)
             }
             .store(in: &cancellables)
 
@@ -62,15 +64,24 @@ final class NotchPanelController {
             .receive(on: RunLoop.main)
             .sink { [weak self] _ in
                 guard let self else { return }
-                self.updateFrame(for: self.model.phase, animated: false)
+                self.updateFrame(
+                    for: self.model.phase,
+                    collapsed: self.model.notchCollapsed,
+                    animated: false
+                )
             }
             .store(in: &cancellables)
     }
 
-    private func updateFrame(for phase: RecorderPhase, animated: Bool) {
+    private func updateFrame(for phase: RecorderPhase, collapsed: Bool, animated: Bool) {
         guard let screen = Self.preferredScreen else { return }
         let notch = Self.notchMetrics(for: screen)
-        let size = Self.size(for: phase, notchWidth: notch.width, notchHeight: notch.height)
+        let size = NotchLayout.size(
+            for: phase,
+            collapsed: collapsed,
+            notchWidth: notch.width,
+            notchHeight: notch.height
+        )
         let frame = NSRect(
             x: screen.frame.midX - size.width / 2,
             y: screen.frame.maxY - size.height,
@@ -111,29 +122,37 @@ final class NotchPanelController {
         )
     }
 
-    private static func size(
+}
+
+struct NotchLayout {
+    static func size(
         for phase: RecorderPhase,
+        collapsed: Bool,
         notchWidth: CGFloat,
         notchHeight: CGFloat
     ) -> CGSize {
-        let idleWidth = max(notchWidth + 18, 218)
-        let compactHeight = max(notchHeight + 10, 42)
+        if collapsed, phase.isRecording {
+            return CGSize(width: max(notchWidth, 340), height: max(notchHeight + 4, 38))
+        }
+        if collapsed, !phase.isIdle {
+            return CGSize(width: notchWidth + 44, height: notchHeight + 6)
+        }
 
         switch phase {
         case .idle:
-            return CGSize(width: idleWidth, height: compactHeight)
+            return CGSize(width: notchWidth, height: notchHeight)
         case .prompt:
-            return CGSize(width: max(idleWidth, 430), height: max(notchHeight + 78, 116))
+            return CGSize(width: max(notchWidth, 540), height: max(notchHeight + 4, 38))
         case .preparing, .saving:
-            return CGSize(width: max(idleWidth, 312), height: max(notchHeight + 42, 76))
+            return CGSize(width: max(notchWidth, 420), height: max(notchHeight + 4, 38))
         case .recording:
-            return CGSize(width: max(idleWidth, 342), height: max(notchHeight + 42, 76))
+            return CGSize(width: max(notchWidth, 520), height: max(notchHeight + 4, 38))
         case .transcribing:
-            return CGSize(width: max(idleWidth, 350), height: max(notchHeight + 44, 78))
+            return CGSize(width: max(notchWidth, 440), height: max(notchHeight + 4, 38))
         case .completed:
-            return CGSize(width: max(idleWidth, 360), height: max(notchHeight + 48, 82))
+            return CGSize(width: max(notchWidth, 500), height: max(notchHeight + 4, 38))
         case .failed:
-            return CGSize(width: max(idleWidth, 450), height: max(notchHeight + 82, 120))
+            return CGSize(width: max(notchWidth, 650), height: max(notchHeight + 10, 44))
         }
     }
 }

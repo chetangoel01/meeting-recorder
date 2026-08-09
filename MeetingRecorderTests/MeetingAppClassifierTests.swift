@@ -15,6 +15,14 @@ final class MeetingAppClassifierTests: XCTestCase {
             MeetingAppClassifier.nativeClientName(bundleIdentifier: "com.apple.FaceTime"),
             "FaceTime"
         )
+        XCTAssertEqual(
+            MeetingAppClassifier.nativeIdentity(bundleIdentifier: "us.zoom.xos.CptHost"),
+            .init(bundleIdentifier: "us.zoom.xos", name: "Zoom")
+        )
+        XCTAssertEqual(
+            MeetingAppClassifier.nativeIdentity(bundleIdentifier: "com.microsoft.teams2.helper"),
+            .init(bundleIdentifier: "com.microsoft.teams2", name: "Microsoft Teams")
+        )
     }
 
     func testRecognizesKnownBrowsersWithoutInspectingTheirBundle() {
@@ -39,6 +47,20 @@ final class MeetingAppClassifierTests: XCTestCase {
         XCTAssertEqual(
             MeetingAppClassifier.browserName(bundleIdentifier: "company.thebrowser.Browser.helper"),
             "Arc"
+        )
+        XCTAssertEqual(
+            MeetingAppClassifier.browserIdentity(
+                bundleIdentifier: "company.thebrowser.Browser.helper.renderer",
+                bundleURL: nil
+            ),
+            .init(bundleIdentifier: "company.thebrowser.Browser", name: "Arc")
+        )
+        XCTAssertEqual(
+            MeetingAppClassifier.browserIdentity(
+                bundleIdentifier: "com.google.Chrome.canary.helper.renderer",
+                bundleURL: nil
+            ),
+            .init(bundleIdentifier: "com.google.Chrome.canary", name: "Chrome Canary")
         )
     }
 

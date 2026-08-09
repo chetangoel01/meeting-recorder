@@ -54,4 +54,54 @@ enum RecorderPhase: Equatable, Sendable {
         if case .recording = self { return true }
         return false
     }
+
+    var isIdle: Bool {
+        if case .idle = self { return true }
+        return false
+    }
+}
+
+enum MeetingOfferAction: Equatable {
+    case present
+    case queue
+    case ignore
+}
+
+extension RecorderPhase {
+    func offerAction(
+        for candidate: MeetingCandidate,
+        currentSession: RecordingSession?
+    ) -> MeetingOfferAction {
+        switch self {
+        case .idle, .completed, .failed:
+            return .present
+        case let .prompt(existing)
+            where existing.trigger == .calendar || candidate.trigger == .calendar:
+            return .ignore
+        case let .preparing(existing)
+            where existing.trigger == .calendar || candidate.trigger == .calendar:
+            return .ignore
+        case let .recording(session)
+            where session.candidate.trigger == .calendar || candidate.trigger == .calendar:
+            return .ignore
+        case .saving
+            where currentSession?.candidate.trigger == .calendar || candidate.trigger == .calendar:
+            return .ignore
+        case .transcribing
+            where currentSession?.candidate.trigger == .calendar || candidate.trigger == .calendar:
+            return .ignore
+        case let .prompt(existing) where existing.id == candidate.id:
+            return .ignore
+        case let .preparing(existing) where existing.id == candidate.id:
+            return .ignore
+        case let .recording(session) where session.candidate.id == candidate.id:
+            return .ignore
+        case .saving where currentSession?.candidate.id == candidate.id:
+            return .ignore
+        case .transcribing where currentSession?.candidate.id == candidate.id:
+            return .ignore
+        default:
+            return .queue
+        }
+    }
 }

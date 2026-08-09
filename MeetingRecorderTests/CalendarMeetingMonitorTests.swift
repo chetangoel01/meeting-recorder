@@ -4,6 +4,22 @@ import XCTest
 
 @MainActor
 final class CalendarMeetingMonitorTests: XCTestCase {
+    func testStableIdentifierDoesNotChangeForUnsavedEvent() {
+        let event = EKEvent(eventStore: EKEventStore())
+        event.title = "Weekly sync"
+        event.startDate = Date(timeIntervalSince1970: 1_800_000_000)
+        event.endDate = event.startDate.addingTimeInterval(30 * 60)
+
+        XCTAssertEqual(
+            CalendarMeetingMonitor.stableIdentifier(for: event),
+            "Weekly sync:1800000000.0"
+        )
+        XCTAssertEqual(
+            CalendarMeetingMonitor.stableIdentifier(for: event),
+            CalendarMeetingMonitor.stableIdentifier(for: event)
+        )
+    }
+
     func testFindsEachSupportedMeetingProvider() {
         let store = EKEventStore()
 

@@ -49,8 +49,13 @@ struct SettingsView: View {
             Section("Recording access") {
                 permissionRow("Microphone", authorized: model.microphoneAuthorized)
                 permissionRow("Screen and system audio", authorized: model.screenAuthorized)
-                Button("Grant recording access") {
-                    Task { await model.requestCapturePermissions() }
+                if !model.microphoneAuthorized || !model.screenAuthorized {
+                    HStack {
+                        Button("Grant recording access") {
+                            Task { await model.requestCapturePermissions() }
+                        }
+                        Button("Open Privacy Settings", action: model.openRecordingPrivacySettings)
+                    }
                 }
                 Text("macOS may require the app to restart after screen and system audio access is granted.")
                     .font(.caption)
@@ -68,6 +73,14 @@ struct SettingsView: View {
                     }
                 if settings.calendarBackup {
                     permissionRow("Calendar", authorized: model.calendarAuthorized)
+                    if !model.calendarAuthorized {
+                        HStack {
+                            Button("Grant calendar access") {
+                                Task { await model.enableCalendarBackup() }
+                            }
+                            Button("Open Calendar Privacy Settings", action: model.openCalendarPrivacySettings)
+                        }
+                    }
                 }
             }
 
@@ -82,6 +95,10 @@ struct SettingsView: View {
         .formStyle(.grouped)
         .padding(10)
         .frame(width: 480, height: 520)
+        .onAppear(perform: model.refreshPermissionState)
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+            model.refreshPermissionState()
+        }
     }
 
     private func permissionRow(_ title: String, authorized: Bool) -> some View {

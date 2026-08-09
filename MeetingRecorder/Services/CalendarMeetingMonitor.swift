@@ -65,7 +65,7 @@ final class CalendarMeetingMonitor {
                 continue
             }
 
-            let eventID = event.eventIdentifier ?? "\(event.title ?? provider):\(event.startDate.timeIntervalSince1970)"
+            let eventID = Self.stableIdentifier(for: event)
             guard promptedEventIdentifiers.insert(eventID).inserted else { continue }
 
             handler(
@@ -79,8 +79,15 @@ final class CalendarMeetingMonitor {
             )
         }
 
-        let liveIDs = Set(events.compactMap(\.eventIdentifier))
+        let liveIDs = Set(events.map(Self.stableIdentifier(for:)))
         promptedEventIdentifiers = promptedEventIdentifiers.filter { liveIDs.contains($0) }
+    }
+
+    static func stableIdentifier(for event: EKEvent) -> String {
+        if let identifier = event.eventIdentifier, !identifier.isEmpty {
+            return identifier
+        }
+        return "\(event.title ?? "Meeting"):\(event.startDate.timeIntervalSince1970)"
     }
 
     static func providerName(for event: EKEvent) -> String? {
