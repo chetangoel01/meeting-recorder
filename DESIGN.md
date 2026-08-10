@@ -57,6 +57,10 @@ Shows an explicit recording label, elapsed time, source client, a visible minimi
 
 An upward drag tracks the pointer directly and returns with a critically damped spring when it does not cross the threshold. On a prompt, committing the gesture means Not a meeting and suppresses that audio session. During capture, it switches to the recording safety strip without changing the operation. During processing, it leaves a small clickable handle below the notch. Completion and error states dismiss through the same upward path.
 
+### Analyzing state
+
+After transcription the notch shows an Analyzing state while the LLM writes the note's summary sections. It uses the same quiet status treatment as Saving; the transcript is already safe on disk before this state begins.
+
 ### Processing state
 
 Shows whether the app is saving audio or transcribing. Processing may continue after the notch collapses, but status remains available from the menu bar.

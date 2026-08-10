@@ -28,6 +28,7 @@ final class AppModel: ObservableObject {
         }
     }
     @Published private(set) var transcripts: [TranscriptRecord] = []
+    @Published private(set) var folders: [String] = []
     @Published private(set) var hasAPIKey = false
     @Published private(set) var microphoneAuthorized = false
     @Published private(set) var screenAuthorized = false
@@ -42,8 +43,10 @@ final class AppModel: ObservableObject {
     private let store: TranscriptStore
     private let recorder: ScreenAudioRecorder
     private let transcriptionClient: TranscriptionClient
+    private let analysisClient: AnalysisClient
     private var currentSession: RecordingSession?
     private var currentAudioURL: URL?
+    private var currentArtifacts: RecordingArtifacts?
     private var pendingCandidate: MeetingCandidate?
     private var started = false
 
@@ -58,10 +61,12 @@ final class AppModel: ObservableObject {
     private init(
         store: TranscriptStore = TranscriptStore(),
         transcriptionClient: TranscriptionClient = TranscriptionClient(),
+        analysisClient: AnalysisClient = AnalysisClient(),
         settings: AppSettings = AppSettings()
     ) {
         self.store = store
         self.transcriptionClient = transcriptionClient
+        self.analysisClient = analysisClient
         self.settings = settings
         recorder = ScreenAudioRecorder(store: store)
     }
@@ -71,7 +76,7 @@ final class AppModel: ObservableObject {
         started = true
 
         try? store.prepareDirectories()
-        transcripts = store.loadTranscripts()
+        reloadTranscripts()
         refreshPermissionState()
         recorder.failureHandler = { [weak self] error in
             self?.activeRecordingDidFail(error)
@@ -150,11 +155,13 @@ final class AppModel: ObservableObject {
         Task {
             do {
                 let expectedDuration = Date().timeIntervalSince(session.startedAt)
-                let audioURL = try await recorder.stop(expectedDuration: expectedDuration)
-                currentAudioURL = audioURL
-                try await transcribe(audioURL: audioURL, session: session)
+                let artifacts = try await recorder.stop(expectedDuration: expectedDuration)
+                currentAudioURL = artifacts.combinedURL
+                currentArtifacts = artifacts
+                try await processRecording(artifacts: artifacts, session: session)
             } catch {
                 currentAudioURL = currentAudioURL ?? recorder.recoverableURL
+                currentArtifacts = currentArtifacts ?? recorder.lastArtifacts
                 presentPendingCandidateOr(
                     .failed(
                         message: error.localizedDescription,
@@ -196,18 +203,22 @@ final class AppModel: ObservableObject {
     }
 
     func retryTranscription() {
-        guard let audioURL = currentAudioURL ?? recorder.recoverableURL,
-              let session = currentSession
+        guard let session = currentSession,
+              let artifacts = currentArtifacts
+                ?? recorder.lastArtifacts
+                ?? (currentAudioURL ?? recorder.recoverableURL).map({
+                    RecordingArtifacts(combinedURL: $0, microphoneURL: nil, systemURL: nil)
+                })
         else {
             phase = .failed(message: "No recoverable audio file was found.", audioURL: nil)
             return
         }
         Task {
             do {
-                try await transcribe(audioURL: audioURL, session: session)
+                try await processRecording(artifacts: artifacts, session: session)
             } catch {
                 presentPendingCandidateOr(
-                    .failed(message: error.localizedDescription, audioURL: audioURL)
+                    .failed(message: error.localizedDescription, audioURL: artifacts.combinedURL)
                 )
             }
         }
@@ -283,6 +294,30 @@ final class AppModel: ObservableObject {
         NSPasteboard.general.setString(record.text, forType: .string)
     }
 
+    // MARK: - Library
+
+    func reloadTranscripts() {
+        transcripts = store.loadTranscripts()
+        folders = store.folders()
+    }
+
+    func moveTranscript(_ record: TranscriptRecord, toFolder folder: String?) {
+        _ = try? store.move(record, toFolder: folder)
+        reloadTranscripts()
+    }
+
+    @discardableResult
+    func createFolder(_ name: String) -> String? {
+        let created = try? store.createFolder(name)
+        reloadTranscripts()
+        return created
+    }
+
+    func deleteTranscript(_ record: TranscriptRecord) {
+        try? store.trash(record)
+        reloadTranscripts()
+    }
+
     private func startRecording(_ candidate: MeetingCandidate) {
         microphoneIncluded = true
         systemAudioIncluded = true
@@ -293,6 +328,7 @@ final class AppModel: ObservableObject {
                 let session = RecordingSession(candidate: candidate, startedAt: .now)
                 currentSession = session
                 currentAudioURL = nil
+                currentArtifacts = nil
                 phase = .recording(session)
             } catch {
                 presentPendingCandidateOr(
@@ -302,46 +338,129 @@ final class AppModel: ObservableObject {
         }
     }
 
-    private func transcribe(audioURL: URL, session: RecordingSession) async throws {
+    // The full post-recording pipeline: transcribe (Me/Them tracks when both
+    // exist), save the raw note immediately, then analyze, retitle, file into
+    // a folder, and export. Analysis failures degrade the note, never lose it.
+    private func processRecording(artifacts: RecordingArtifacts, session: RecordingSession) async throws {
         guard let apiKey = KeychainStore.loadAPIKey(), !apiKey.isEmpty else {
             phase = .failed(
                 message: "Add your OpenRouter API key to transcribe. The audio has been kept.",
-                audioURL: audioURL
+                audioURL: artifacts.combinedURL
             )
             return
         }
 
         phase = .transcribing(progress: 0)
-        let result = try await transcriptionClient.transcribe(
-            fileURL: audioURL,
-            apiKey: apiKey,
-            model: settings.transcriptionModel
-        ) { [weak self] progress in
-            self?.phase = .transcribing(progress: progress)
-        }
+        let (transcriptMarkdown, transcriptionCost) = try await transcribe(artifacts, apiKey: apiKey)
 
-        let duration = try await AVURLAsset(url: audioURL).load(.duration).seconds
+        let duration = try await AVURLAsset(url: artifacts.combinedURL).load(.duration).seconds
         guard duration.isFinite, duration > 0 else {
             throw RecordingError.exportFailed
         }
-        let keptAudioURL = settings.keepRecordings ? audioURL : nil
-        let title = "\(session.candidate.appName) meeting"
-        let record = try store.saveTranscript(
-            title: title,
+
+        let calendarEvent = calendarMonitor.eventMatching(
+            start: session.startedAt,
+            end: session.startedAt.addingTimeInterval(duration)
+        )
+        let keptAudioURL = settings.keepRecordings ? artifacts.combinedURL : nil
+        var note = MeetingNote(
+            id: UUID(),
+            title: calendarEvent?.title ?? "\(session.candidate.appName) meeting",
             sourceApplication: session.candidate.appName,
             startedAt: session.startedAt,
             duration: duration,
-            text: result.text,
-            cost: result.cost,
-            audioURL: keptAudioURL
+            cost: transcriptionCost,
+            audioFilename: keptAudioURL?.lastPathComponent,
+            analysisMarkdown: nil,
+            transcriptMarkdown: transcriptMarkdown
         )
-        if !settings.keepRecordings {
-            try? FileManager.default.removeItem(at: audioURL)
+        // The transcript is on disk before analysis begins; a crash or API
+        // failure past this point can no longer lose paid transcription work.
+        var record = try store.save(note, folder: nil)
+
+        if settings.analysisEnabled {
+            phase = .analyzing
+            do {
+                let context = AnalysisContext(
+                    fallbackTitle: note.title,
+                    sourceApplication: session.candidate.appName,
+                    startedAt: session.startedAt,
+                    duration: duration,
+                    calendarEvent: calendarEvent,
+                    existingFolders: store.folders()
+                )
+                let (outcome, analysisCost) = try await analysisClient.analyze(
+                    transcript: transcriptMarkdown,
+                    context: context,
+                    apiKey: apiKey,
+                    model: settings.analysisModel
+                )
+                if calendarEvent == nil, let title = outcome.title {
+                    note.title = title
+                }
+                note.analysisMarkdown = outcome.analysisMarkdown
+                if transcriptionCost != nil || analysisCost != nil {
+                    note.cost = (transcriptionCost ?? 0) + (analysisCost ?? 0)
+                }
+                record = try store.update(record, with: note)
+                if let folder = outcome.suggestedFolder {
+                    _ = try? store.move(record, toFolder: folder)
+                }
+            } catch {
+                note.analysisMarkdown = "## Summary\n\n_Analysis unavailable: \(error.localizedDescription)_"
+                record = (try? store.update(record, with: note)) ?? record
+            }
         }
 
+        reloadTranscripts()
+        let finalRecord = transcripts.first { $0.id == note.id } ?? record
+
+        if settings.obsidianExportEnabled, !settings.obsidianExportPath.isEmpty {
+            try? store.exportCopy(of: finalRecord, to: URL(filePath: settings.obsidianExportPath))
+        }
+
+        if !settings.keepRecordings {
+            try? FileManager.default.removeItem(at: artifacts.combinedURL)
+        }
+        for trackURL in artifacts.trackURLs {
+            try? FileManager.default.removeItem(at: trackURL)
+        }
         currentAudioURL = keptAudioURL
-        transcripts.insert(record, at: 0)
-        presentPendingCandidateOr(.completed(record))
+        currentArtifacts = nil
+        presentPendingCandidateOr(.completed(finalRecord))
+    }
+
+    private func transcribe(
+        _ artifacts: RecordingArtifacts,
+        apiKey: String
+    ) async throws -> (markdown: String, cost: Double?) {
+        let progressHandler: @MainActor @Sendable (Double) -> Void = { [weak self] progress in
+            self?.phase = .transcribing(progress: progress)
+        }
+
+        if let microphoneURL = artifacts.microphoneURL,
+           let systemURL = artifacts.systemURL,
+           FileManager.default.fileExists(atPath: microphoneURL.path),
+           FileManager.default.fileExists(atPath: systemURL.path) {
+            let dual = try await transcriptionClient.transcribeDualTrack(
+                microphoneURL: microphoneURL,
+                systemURL: systemURL,
+                apiKey: apiKey,
+                model: settings.transcriptionModel,
+                progress: progressHandler
+            )
+            if !dual.isEmpty {
+                return (TrackTranscriptBuilder.markdown(me: dual.me, them: dual.them), dual.cost)
+            }
+        }
+
+        let single = try await transcriptionClient.transcribe(
+            fileURL: artifacts.combinedURL,
+            apiKey: apiKey,
+            model: settings.transcriptionModel,
+            progress: progressHandler
+        )
+        return (single.text, single.cost)
     }
 
     private func activeRecordingDidFail(_ error: any Error) {
@@ -352,13 +471,15 @@ final class AppModel: ObservableObject {
         Task {
             do {
                 let expectedDuration = Date().timeIntervalSince(session.startedAt)
-                let audioURL = try await recorder.stop(expectedDuration: expectedDuration)
-                currentAudioURL = audioURL
+                let artifacts = try await recorder.stop(expectedDuration: expectedDuration)
+                currentAudioURL = artifacts.combinedURL
+                currentArtifacts = artifacts
                 presentPendingCandidateOr(
-                    .failed(message: error.localizedDescription, audioURL: audioURL)
+                    .failed(message: error.localizedDescription, audioURL: artifacts.combinedURL)
                 )
             } catch {
                 currentAudioURL = recorder.recoverableURL
+                currentArtifacts = recorder.lastArtifacts
                 presentPendingCandidateOr(
                     .failed(message: error.localizedDescription, audioURL: currentAudioURL)
                 )

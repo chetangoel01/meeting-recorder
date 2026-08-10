@@ -6,6 +6,19 @@ struct TranscriptionResult: Sendable {
     let cost: Double?
 }
 
+struct TimedTranscriptChunk: Equatable, Sendable {
+    let offset: TimeInterval
+    let text: String
+}
+
+struct DualTrackTranscription: Sendable {
+    let me: [TimedTranscriptChunk]
+    let them: [TimedTranscriptChunk]
+    let cost: Double?
+
+    var isEmpty: Bool { me.isEmpty && them.isEmpty }
+}
+
 enum TranscriptionError: LocalizedError {
     case invalidResponse
     case server(statusCode: Int, message: String)
@@ -29,7 +42,10 @@ enum TranscriptionError: LocalizedError {
 struct TranscriptionClient: Sendable {
     private let session: URLSession
     private let endpoint = URL(string: "https://openrouter.ai/api/v1/audio/transcriptions")!
-    private let chunkDuration: TimeInterval = 8 * 60
+    private let singleTrackChunkDuration: TimeInterval = 8 * 60
+    // Speaker turns interleave at chunk granularity, so per-source tracks use
+    // short chunks; the combined fallback keeps long ones to reduce requests.
+    private let trackChunkDuration: TimeInterval = 2 * 60
 
     init(session: URLSession = .shared) {
         self.session = session
@@ -41,19 +57,15 @@ struct TranscriptionClient: Sendable {
         model: String,
         progress: @escaping @MainActor @Sendable (Double) -> Void
     ) async throws -> TranscriptionResult {
-        let chunks = try await splitIfNeeded(fileURL)
-        defer {
-            for chunk in chunks where chunk != fileURL {
-                try? FileManager.default.removeItem(at: chunk)
-            }
-        }
+        let chunks = try await splitIntoChunks(fileURL, chunkDuration: singleTrackChunkDuration)
+        defer { cleanUp(chunks, source: fileURL) }
 
         var transcriptParts: [String] = []
         var totalCost: Double = 0
         var receivedCost = false
 
         for (index, chunk) in chunks.enumerated() {
-            let result = try await transcribeChunk(chunk, apiKey: apiKey, model: model)
+            let result = try await transcribeChunk(chunk.url, apiKey: apiKey, model: model)
             transcriptParts.append(result.text)
             if let cost = result.cost {
                 totalCost += cost
@@ -65,6 +77,59 @@ struct TranscriptionClient: Sendable {
         let text = transcriptParts.joined(separator: "\n\n").trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { throw TranscriptionError.emptyTranscript }
         return TranscriptionResult(text: text, cost: receivedCost ? totalCost : nil)
+    }
+
+    // Transcribes the Me and Them tracks as independent timed chunks. Silent
+    // chunks are dropped before upload: Whisper reliably hallucinates filler
+    // ("Thank you.") on near-silent audio, and the mic track is silent for
+    // every stretch where the user is just listening.
+    func transcribeDualTrack(
+        microphoneURL: URL,
+        systemURL: URL,
+        apiKey: String,
+        model: String,
+        progress: @escaping @MainActor @Sendable (Double) -> Void
+    ) async throws -> DualTrackTranscription {
+        let microphoneChunks = try await splitIntoChunks(microphoneURL, chunkDuration: trackChunkDuration)
+        let systemChunks = try await splitIntoChunks(systemURL, chunkDuration: trackChunkDuration)
+        defer {
+            cleanUp(microphoneChunks, source: microphoneURL)
+            cleanUp(systemChunks, source: systemURL)
+        }
+
+        let audibleMicrophone = microphoneChunks.filter { Self.isAudible($0.url) }
+        let audibleSystem = systemChunks.filter { Self.isAudible($0.url) }
+        let total = audibleMicrophone.count + audibleSystem.count
+        guard total > 0 else {
+            return DualTrackTranscription(me: [], them: [], cost: nil)
+        }
+
+        var completed = 0
+        var totalCost: Double = 0
+        var receivedCost = false
+
+        func transcribeAll(_ chunks: [AudioChunk]) async throws -> [TimedTranscriptChunk] {
+            var results: [TimedTranscriptChunk] = []
+            for chunk in chunks {
+                let result = try await transcribeChunk(chunk.url, apiKey: apiKey, model: model)
+                let text = result.text.trimmingCharacters(in: .whitespacesAndNewlines)
+                if !text.isEmpty {
+                    results.append(TimedTranscriptChunk(offset: chunk.offset, text: text))
+                }
+                if let cost = result.cost {
+                    totalCost += cost
+                    receivedCost = true
+                }
+                completed += 1
+                let fraction = Double(completed) / Double(total)
+                await progress(fraction)
+            }
+            return results
+        }
+
+        let me = try await transcribeAll(audibleMicrophone)
+        let them = try await transcribeAll(audibleSystem)
+        return DualTrackTranscription(me: me, them: them, cost: receivedCost ? totalCost : nil)
     }
 
     private func transcribeChunk(_ url: URL, apiKey: String, model: String) async throws -> TranscriptionResult {
@@ -94,9 +159,6 @@ struct TranscriptionClient: Sendable {
                     let message = (try? JSONDecoder().decode(ErrorResponse.self, from: data).error.message)
                         ?? String(data: data, encoding: .utf8)
                         ?? "Unknown error"
-                    if httpResponse.statusCode == 401 || httpResponse.statusCode == 402 {
-                        throw TranscriptionError.server(statusCode: httpResponse.statusCode, message: message)
-                    }
                     throw TranscriptionError.server(statusCode: httpResponse.statusCode, message: message)
                 }
 
@@ -112,12 +174,17 @@ struct TranscriptionClient: Sendable {
         throw lastError ?? TranscriptionError.invalidResponse
     }
 
-    private func splitIfNeeded(_ url: URL) async throws -> [URL] {
+    private struct AudioChunk: Sendable {
+        let offset: TimeInterval
+        let url: URL
+    }
+
+    private func splitIntoChunks(_ url: URL, chunkDuration: TimeInterval) async throws -> [AudioChunk] {
         let asset = AVURLAsset(url: url)
         let duration = try await asset.load(.duration).seconds
-        guard duration > chunkDuration else { return [url] }
+        guard duration > chunkDuration else { return [AudioChunk(offset: 0, url: url)] }
 
-        var chunks: [URL] = []
+        var chunks: [AudioChunk] = []
         var offset: TimeInterval = 0
         while offset < duration {
             guard let exporter = AVAssetExportSession(asset: asset, presetName: AVAssetExportPresetAppleM4A) else {
@@ -132,14 +199,50 @@ struct TranscriptionClient: Sendable {
             )
             do {
                 try await exporter.export(to: outputURL, as: .m4a)
-                chunks.append(outputURL)
+                chunks.append(AudioChunk(offset: offset, url: outputURL))
             } catch {
-                for chunk in chunks { try? FileManager.default.removeItem(at: chunk) }
+                cleanUp(chunks, source: url)
                 throw TranscriptionError.couldNotSplitAudio
             }
             offset += remaining
         }
         return chunks
+    }
+
+    private func cleanUp(_ chunks: [AudioChunk], source: URL) {
+        for chunk in chunks where chunk.url != source {
+            try? FileManager.default.removeItem(at: chunk.url)
+        }
+    }
+
+    // Returns whether any block of the file rises above roughly -50 dBFS RMS.
+    // Errors err toward audible so a decode problem never drops real speech.
+    static func isAudible(_ url: URL) -> Bool {
+        guard let file = try? AVAudioFile(forReading: url) else { return true }
+        let format = file.processingFormat
+        guard let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: 1 << 16) else {
+            return true
+        }
+
+        let threshold: Float = 0.003
+        while file.framePosition < file.length {
+            do {
+                try file.read(into: buffer)
+            } catch {
+                return true
+            }
+            let frames = Int(buffer.frameLength)
+            guard frames > 0, let channels = buffer.floatChannelData else { break }
+            for channel in 0..<Int(format.channelCount) {
+                var sum: Float = 0
+                let data = channels[channel]
+                for index in 0..<frames {
+                    sum += data[index] * data[index]
+                }
+                if (sum / Float(frames)).squareRoot() > threshold { return true }
+            }
+        }
+        return false
     }
 }
 

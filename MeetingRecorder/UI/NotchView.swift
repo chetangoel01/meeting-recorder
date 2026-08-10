@@ -142,6 +142,13 @@ struct NotchView: View {
                 EmptyView()
             }
 
+        case .analyzing:
+            wingLayout {
+                statusRow(title: "Analyzing meeting…")
+            } right: {
+                EmptyView()
+            }
+
         case let .transcribing(progress):
             wingLayout {
                 HStack(spacing: 7) {

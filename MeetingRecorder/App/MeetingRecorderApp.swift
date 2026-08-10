@@ -13,10 +13,10 @@ struct MeetingRecorderApp: App {
         }
         .menuBarExtraStyle(.menu)
 
-        Window("Transcripts", id: "transcripts") {
+        Window("Meeting Library", id: "transcripts") {
             TranscriptHistoryView(model: model)
         }
-        .defaultSize(width: 720, height: 520)
+        .defaultSize(width: 900, height: 560)
 
         Settings {
             SettingsView(model: model)

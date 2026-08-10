@@ -147,7 +147,7 @@ struct NotchLayout {
             return CGSize(width: max(notchWidth, 420), height: max(notchHeight + 4, 38))
         case .recording:
             return CGSize(width: max(notchWidth, 520), height: max(notchHeight + 4, 38))
-        case .transcribing:
+        case .transcribing, .analyzing:
             return CGSize(width: max(notchWidth, 440), height: max(notchHeight + 4, 38))
         case .completed:
             return CGSize(width: max(notchWidth, 500), height: max(notchHeight + 4, 38))

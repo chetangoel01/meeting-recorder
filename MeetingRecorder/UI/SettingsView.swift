@@ -84,6 +84,39 @@ struct SettingsView: View {
                 }
             }
 
+            Section("Meeting notes") {
+                Toggle("Analyze transcripts with an LLM", isOn: $settings.analysisEnabled)
+                if settings.analysisEnabled {
+                    TextField("Analysis model", text: $settings.analysisModel)
+                        .textFieldStyle(.roundedBorder)
+                    Text("Adds a summary, decisions, action items, and open questions to each note, names the meeting, and files it into a folder. Uses the same OpenRouter key.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+
+            Section("Obsidian") {
+                Toggle("Copy finished notes into an Obsidian folder", isOn: $settings.obsidianExportEnabled)
+                    .onChange(of: settings.obsidianExportEnabled) {
+                        if settings.obsidianExportEnabled, settings.obsidianExportPath.isEmpty {
+                            settings.obsidianExportPath = AppSettings.defaultObsidianExportPath
+                        }
+                    }
+                if settings.obsidianExportEnabled {
+                    TextField("Vault folder path", text: $settings.obsidianExportPath)
+                        .textFieldStyle(.roundedBorder)
+                    Button("Choose folder…") {
+                        let panel = NSOpenPanel()
+                        panel.canChooseFiles = false
+                        panel.canChooseDirectories = true
+                        panel.canCreateDirectories = true
+                        if panel.runModal() == .OK, let url = panel.url {
+                            settings.obsidianExportPath = url.path
+                        }
+                    }
+                }
+            }
+
             Section("Storage") {
                 Toggle("Keep audio after successful transcription", isOn: $settings.keepRecordings)
                 Button("Show transcript folder", action: model.revealTranscripts)

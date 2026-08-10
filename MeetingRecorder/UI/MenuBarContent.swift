@@ -14,7 +14,7 @@ struct MenuBarContent: View {
 
         Divider()
 
-        Button("Transcripts…", systemImage: "text.document") {
+        Button("Meeting library…", systemImage: "text.document") {
             openWindow(id: "transcripts")
             NSApp.activate(ignoringOtherApps: true)
         }

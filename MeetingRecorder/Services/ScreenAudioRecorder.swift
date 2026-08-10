@@ -54,6 +54,18 @@ struct RecordingDurationValidator {
     }
 }
 
+// The combined file is the retained recording; the per-source tracks share its
+// timeline origin and exist only to attribute transcript lines to Me or Them.
+struct RecordingArtifacts: Sendable {
+    let combinedURL: URL
+    let microphoneURL: URL?
+    let systemURL: URL?
+
+    var trackURLs: [URL] {
+        [microphoneURL, systemURL].compactMap { $0 }
+    }
+}
+
 @MainActor
 final class ScreenAudioRecorder: NSObject, SCStreamDelegate {
     typealias FailureHandler = @MainActor @Sendable (any Error) -> Void
@@ -72,6 +84,7 @@ final class ScreenAudioRecorder: NSObject, SCStreamDelegate {
     private var isStopping = false
     private var hasStartedHealthyCapture = false
     private(set) var recoverableURL: URL?
+    private(set) var lastArtifacts: RecordingArtifacts?
     var failureHandler: FailureHandler?
 
     init(store: TranscriptStore) {
@@ -193,7 +206,7 @@ final class ScreenAudioRecorder: NSObject, SCStreamDelegate {
         }
     }
 
-    func stop(expectedDuration: TimeInterval) async throws -> URL {
+    func stop(expectedDuration: TimeInterval) async throws -> RecordingArtifacts {
         guard let stream, let captureOutput, let workDirectory else {
             throw RecordingError.couldNotCreateRecording
         }
@@ -219,20 +232,31 @@ final class ScreenAudioRecorder: NSObject, SCStreamDelegate {
             throw reportedCaptureFailure ?? result.failure ?? RecordingError.noAudioCaptured
         }
 
+        // All three mixes share one timeline origin so transcript timestamps
+        // from the per-source tracks line up with the combined recording.
+        let origin = result.segments.map(\.sourceStartTime).min() ?? .zero
         let audioURL = try store.newRecordingURL(extension: "m4a")
         do {
             try await Self.mixAudioSegments(
                 result.segments,
+                origin: origin,
                 minimumDuration: expectedDuration,
                 to: audioURL
             )
             recoverableURL = audioURL
-            try? FileManager.default.removeItem(at: workDirectory)
         } catch {
             recoverableURL = result.segments.first?.url
             Self.logger.error("Audio merge failed: \(error.localizedDescription, privacy: .public)")
             throw RecordingError.exportFailed
         }
+
+        let artifacts = RecordingArtifacts(
+            combinedURL: audioURL,
+            microphoneURL: await mixTrack(.microphone, from: result.segments, origin: origin),
+            systemURL: await mixTrack(.system, from: result.segments, origin: origin)
+        )
+        lastArtifacts = artifacts
+        try? FileManager.default.removeItem(at: workDirectory)
 
         let actualDuration = try await Self.duration(of: audioURL)
         Self.logger.info(
@@ -245,7 +269,30 @@ final class ScreenAudioRecorder: NSObject, SCStreamDelegate {
         guard RecordingDurationValidator.isComplete(expected: expectedDuration, actual: actualDuration) else {
             throw RecordingError.durationMismatch(expected: expectedDuration, actual: actualDuration)
         }
-        return audioURL
+        return artifacts
+    }
+
+    // Per-source tracks are best-effort: a failed track mix degrades speaker
+    // attribution, never the recording itself. Both sources must be present —
+    // a single-source recording has nothing to attribute.
+    private func mixTrack(
+        _ source: AudioSource,
+        from segments: [AudioSegment],
+        origin: CMTime
+    ) async -> URL? {
+        let sourceSegments = segments.filter { $0.source == source }
+        guard !sourceSegments.isEmpty, sourceSegments.count < segments.count else { return nil }
+
+        let suffix = source == .microphone ? "meeting-me" : "meeting-them"
+        guard let url = try? store.newRecordingURL(extension: "m4a", suffix: suffix) else { return nil }
+        do {
+            try await Self.mixAudioSegments(sourceSegments, origin: origin, minimumDuration: 0, to: url)
+            return url
+        } catch {
+            Self.logger.error("Track mix failed for \(source.rawValue, privacy: .public): \(error.localizedDescription, privacy: .public)")
+            try? FileManager.default.removeItem(at: url)
+            return nil
+        }
     }
 
     func cancel() async {
@@ -260,6 +307,7 @@ final class ScreenAudioRecorder: NSObject, SCStreamDelegate {
         if let captureOutput { await captureOutput.cancel() }
         if let workDirectory { try? FileManager.default.removeItem(at: workDirectory) }
         recoverableURL = nil
+        lastArtifacts = nil
         clearState()
     }
 
@@ -318,11 +366,11 @@ final class ScreenAudioRecorder: NSObject, SCStreamDelegate {
 
     private static func mixAudioSegments(
         _ segments: [AudioSegment],
+        origin: CMTime,
         minimumDuration: TimeInterval,
         to destinationURL: URL
     ) async throws {
         let composition = AVMutableComposition()
-        let origin = segments.map(\.sourceStartTime).min() ?? .zero
 
         for segment in segments.sorted(by: { $0.sourceStartTime < $1.sourceStartTime }) {
             let asset = AVURLAsset(url: segment.url)
@@ -335,6 +383,15 @@ final class ScreenAudioRecorder: NSObject, SCStreamDelegate {
 
             let duration = try await asset.load(.duration)
             let insertionTime = CMTimeMaximum(.zero, segment.sourceStartTime - origin)
+            // Materialize the leading gap explicitly. A source excluded at the
+            // start of a recording produces its first segment mid-timeline, and
+            // an empty track is not guaranteed to preserve an insertion offset —
+            // silently shifting every timestamp on that track earlier.
+            if insertionTime > .zero {
+                destinationTrack.insertEmptyTimeRange(
+                    CMTimeRange(start: .zero, duration: insertionTime)
+                )
+            }
             try destinationTrack.insertTimeRange(
                 CMTimeRange(start: .zero, duration: duration),
                 of: sourceTrack,

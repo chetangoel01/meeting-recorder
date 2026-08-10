@@ -1,10 +1,10 @@
 # Meeting Recorder
 
-Meeting Recorder is a native macOS utility that detects meeting-client audio activity, records both sides of the call, and sends the audio to OpenRouter for plain transcription. Its primary controls expand from the MacBook camera notch.
+Meeting Recorder is a native macOS utility that detects meeting-client audio activity, records both sides of the call, and turns each meeting into an analyzed Markdown note: a speaker-attributed transcript plus an LLM-written summary, decisions, action items, and open questions, filed into folders. Its primary controls expand from the MacBook camera notch.
 
 The app icon uses the same visual language as the overlay: a light blue waveform wrapped around a coral recording dot on a warm, friendly background. The complete macOS icon set lives in the asset catalog.
 
-There is no transcript analysis, bot participant, hosted backend, or subscription. The app stores the OpenRouter key in Keychain and keeps meeting audio locally until transcription succeeds.
+There is no bot participant, hosted backend, or subscription. The app stores the OpenRouter key in Keychain and keeps meeting audio locally until transcription succeeds. Transcription and analysis both run through the user's own OpenRouter key.
 
 ## Current scope
 
@@ -15,8 +15,12 @@ There is no transcript analysis, bot participant, hosted backend, or subscriptio
 - Expands into narrow left and right wings around the physical notch instead of dropping a panel below it. Click the upward chevron during recording—or drag upward anywhere on the overlay—to tuck active controls away. Tucked mode keeps only the red recording light, microphone mute, and Stop; click the red light to restore the full controls. Processing states use a small handle.
 - During recording, microphone and call-audio buttons independently include or exclude each source from the saved recording.
 - Captures system audio and microphone samples directly through ScreenCaptureKit, then writes independent two-minute M4A recovery chunks instead of relying on ScreenCaptureKit's recording-output wrapper.
-- Splits long recordings into eight-minute M4A chunks before transcription to reduce provider timeouts.
-- Stores transcripts as readable Markdown in `~/Library/Application Support/Meeting Recorder/Transcripts`.
+- Transcribes the microphone and call-audio tracks separately when both sides spoke, interleaving them into **Me** / **Them** blocks with timestamps at two-minute granularity. Near-silent chunks are dropped before upload so Whisper cannot hallucinate filler on them. Single-source recordings fall back to a plain combined transcript in eight-minute chunks.
+- Runs an LLM analysis pass after every transcription (optional, on by default): summary, decisions, action items, and open questions are written above the transcript, the meeting gets a short title, and the note is filed into a suggested folder. Analysis failures degrade to a plain transcript; they never lose one.
+- Names meetings from the overlapping calendar event when Calendar access is granted, including attendees in the analysis context.
+- Stores notes as Markdown with YAML frontmatter in `~/Library/Application Support/Meeting Recorder/Transcripts`, one subdirectory per folder. Notes created by older versions load unchanged.
+- Ships a Meeting Library window: folder sidebar, full-text search across titles, transcripts, and analysis, a note viewer, and context-menu filing (move between folders, create folders, trash).
+- Optionally copies every finished note into an Obsidian vault folder.
 - Retains source audio after any recording or transcription failure.
 
 ## Requirements
@@ -25,7 +29,7 @@ There is no transcript analysis, bot participant, hosted backend, or subscriptio
 - Xcode 26 or later.
 - An OpenRouter API key with access to a speech-to-text model.
 
-The default model is `openai/whisper-large-v3`. You can change the model identifier in Settings.
+The default transcription model is `openai/whisper-large-v3` and the default analysis model is `anthropic/claude-haiku-4.5`. Both identifiers are editable in Settings; if OpenRouter renames a model, the failure surfaces in the note's analysis section and the fix is updating the Settings field.
 
 ## Build and run
 

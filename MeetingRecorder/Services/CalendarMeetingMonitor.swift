@@ -1,6 +1,12 @@
 import EventKit
 import Foundation
 
+struct MatchedCalendarEvent: Equatable, Sendable {
+    let title: String
+    let attendees: [String]
+    let calendarName: String?
+}
+
 @MainActor
 final class CalendarMeetingMonitor {
     typealias Handler = @MainActor (MeetingCandidate) -> Void
@@ -81,6 +87,39 @@ final class CalendarMeetingMonitor {
 
         let liveIDs = Set(events.map(Self.stableIdentifier(for:)))
         promptedEventIdentifiers = promptedEventIdentifiers.filter { liveIDs.contains($0) }
+    }
+
+    // Finds the calendar event that best overlaps a finished recording so the
+    // saved note can carry a real meeting title and attendee list. Works even
+    // when calendar backup prompts are disabled, as long as access is granted.
+    func eventMatching(start: Date, end: Date) -> MatchedCalendarEvent? {
+        guard authorizationStatus == .fullAccess else { return nil }
+        let predicate = eventStore.predicateForEvents(
+            withStart: start.addingTimeInterval(-10 * 60),
+            end: end,
+            calendars: nil
+        )
+
+        let best = eventStore.events(matching: predicate)
+            .filter { !$0.isAllDay && $0.status != .canceled }
+            .max { lhs, rhs in
+                overlap(of: lhs, start: start, end: end) < overlap(of: rhs, start: start, end: end)
+            }
+        guard let best, overlap(of: best, start: start, end: end) > 0 else { return nil }
+
+        let attendees = (best.attendees ?? [])
+            .filter { $0.participantType == .person && !$0.isCurrentUser }
+            .compactMap { $0.name ?? $0.url.absoluteString.replacingOccurrences(of: "mailto:", with: "") }
+        return MatchedCalendarEvent(
+            title: best.title?.isEmpty == false ? best.title! : "Meeting",
+            attendees: attendees,
+            calendarName: best.calendar?.title
+        )
+    }
+
+    private func overlap(of event: EKEvent, start: Date, end: Date) -> TimeInterval {
+        guard let eventStart = event.startDate, let eventEnd = event.endDate else { return 0 }
+        return max(0, min(end, eventEnd).timeIntervalSince(max(start, eventStart)))
     }
 
     static func stableIdentifier(for event: EKEvent) -> String {

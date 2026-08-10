@@ -35,9 +35,11 @@ struct TranscriptRecord: Codable, Identifiable, Equatable, Sendable {
     let startedAt: Date
     let duration: TimeInterval
     let text: String
+    let analysis: String?
     let cost: Double?
     let markdownURL: URL
     let audioURL: URL?
+    let folder: String?
 }
 
 enum RecorderPhase: Equatable, Sendable {
@@ -47,6 +49,7 @@ enum RecorderPhase: Equatable, Sendable {
     case recording(RecordingSession)
     case saving
     case transcribing(progress: Double)
+    case analyzing
     case completed(TranscriptRecord)
     case failed(message: String, audioURL: URL?)
 
@@ -90,6 +93,9 @@ extension RecorderPhase {
         case .transcribing
             where currentSession?.candidate.trigger == .calendar || candidate.trigger == .calendar:
             return .ignore
+        case .analyzing
+            where currentSession?.candidate.trigger == .calendar || candidate.trigger == .calendar:
+            return .ignore
         case let .prompt(existing) where existing.id == candidate.id:
             return .ignore
         case let .preparing(existing) where existing.id == candidate.id:
@@ -99,6 +105,8 @@ extension RecorderPhase {
         case .saving where currentSession?.candidate.id == candidate.id:
             return .ignore
         case .transcribing where currentSession?.candidate.id == candidate.id:
+            return .ignore
+        case .analyzing where currentSession?.candidate.id == candidate.id:
             return .ignore
         default:
             return .queue
