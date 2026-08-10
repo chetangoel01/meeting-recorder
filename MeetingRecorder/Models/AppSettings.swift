@@ -58,7 +58,7 @@ final class AppSettings: ObservableObject {
         keepRecordings = defaults.object(forKey: Key.keepRecordings) as? Bool ?? false
         transcriptionModel = defaults.string(forKey: Key.transcriptionModel) ?? "openai/whisper-large-v3"
         analysisEnabled = defaults.object(forKey: Key.analysisEnabled) as? Bool ?? true
-        analysisModel = defaults.string(forKey: Key.analysisModel) ?? "anthropic/claude-haiku-4.5"
+        analysisModel = defaults.string(forKey: Key.analysisModel) ?? "deepseek/deepseek-v4-pro"
         obsidianExportEnabled = defaults.object(forKey: Key.obsidianExportEnabled) as? Bool ?? false
         obsidianExportPath = defaults.string(forKey: Key.obsidianExportPath) ?? ""
     }

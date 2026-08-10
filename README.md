@@ -29,7 +29,7 @@ There is no bot participant, hosted backend, or subscription. The app stores the
 - Xcode 26 or later.
 - An OpenRouter API key with access to a speech-to-text model.
 
-The default transcription model is `openai/whisper-large-v3` and the default analysis model is `anthropic/claude-haiku-4.5`. Both identifiers are editable in Settings; if OpenRouter renames a model, the failure surfaces in the note's analysis section and the fix is updating the Settings field.
+The default transcription model is `openai/whisper-large-v3` and the default analysis model is `deepseek/deepseek-v4-pro` (verified against OpenRouter's live model list; roughly $0.44/M input tokens, well under a cent per meeting). Both identifiers are editable in Settings; if OpenRouter renames a model, the failure surfaces in the note's analysis section and the fix is updating the Settings field.
 
 ## Build and run
 
