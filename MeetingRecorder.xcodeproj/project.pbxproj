@@ -34,6 +34,7 @@
 		E910B45B95ADAD36440AEAD7 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DA0E9E88C8DA982A76521B00 /* SettingsView.swift */; };
 		EC72AC92392A0AB60F329CCE /* AnalysisOutcomeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7263A88BFA454E095EF340C7 /* AnalysisOutcomeTests.swift */; };
 		ED1ECAB981CDA327002C1A62 /* AnalysisClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4EAD963E3F91BB8E6E8F86C1 /* AnalysisClient.swift */; };
+		EDB1147EB43C2F3B1B85FBF8 /* AppRelocator.swift in Sources */ = {isa = PBXBuildFile; fileRef = A809315A3A130DE4126B7F58 /* AppRelocator.swift */; };
 		FAA49726C4E926856F0A16E1 /* TranscriptionClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = EB48EA44A8FA9BAB43DDB7EA /* TranscriptionClient.swift */; };
 /* End PBXBuildFile section */
 
@@ -64,6 +65,7 @@
 		9A74873C97E9B48A2FB0E85C /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		A3633EE8FBDE4807AF0BADCB /* MeetingActivityRuleTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MeetingActivityRuleTests.swift; sourceTree = "<group>"; };
 		A70F7BE32AB1ED7A9D98D286 /* MeetingRecorderTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = MeetingRecorderTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		A809315A3A130DE4126B7F58 /* AppRelocator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppRelocator.swift; sourceTree = "<group>"; };
 		AA7DECDEB33B16CB1D985BA5 /* MeetingAppClassifierTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MeetingAppClassifierTests.swift; sourceTree = "<group>"; };
 		B66F6DED41970E9C8EF963A6 /* CalendarMeetingMonitorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CalendarMeetingMonitorTests.swift; sourceTree = "<group>"; };
 		BBF162DE78789AC1C2835B97 /* TrackTranscriptBuilderTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TrackTranscriptBuilderTests.swift; sourceTree = "<group>"; };
@@ -123,6 +125,7 @@
 			children = (
 				FEA9B8CFD45F64217A65E22A /* AppDelegate.swift */,
 				FCBDCEDA7069B63DED0D86D6 /* AppModel.swift */,
+				A809315A3A130DE4126B7F58 /* AppRelocator.swift */,
 				2D42CF914F5DE82DFF54A34E /* MeetingRecorderApp.swift */,
 			);
 			path = App;
@@ -282,6 +285,7 @@
 				ED1ECAB981CDA327002C1A62 /* AnalysisClient.swift in Sources */,
 				56F4E362EFC1047E1991FD48 /* AppDelegate.swift in Sources */,
 				2F45C2C27A020C070A044F8B /* AppModel.swift in Sources */,
+				EDB1147EB43C2F3B1B85FBF8 /* AppRelocator.swift in Sources */,
 				64B48749B2C682AED3CF8C3B /* AppSettings.swift in Sources */,
 				39099537821C07CA9180B281 /* CalendarMeetingMonitor.swift in Sources */,
 				43C64881592FE5D108F1B8F7 /* KeychainStore.swift in Sources */,

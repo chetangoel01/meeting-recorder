@@ -5,6 +5,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
+        if AppRelocator.offerMoveIfNeeded() { return }
         notchController = NotchPanelController(model: .shared)
         notchController?.show()
         AppModel.shared.start()

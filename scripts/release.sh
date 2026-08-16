@@ -70,8 +70,23 @@ DMG="$BUILD_DIR/MeetingRecorder-$VERSION.dmg"
 DMG_ROOT="$BUILD_DIR/dmg-root"
 mkdir -p "$DMG_ROOT"
 cp -R "$STAGED" "$DMG_ROOT/"
-ln -s /Applications "$DMG_ROOT/Applications"
-hdiutil create -volname "$APP_NAME" -srcfolder "$DMG_ROOT" -ov -format UDZO "$DMG" -quiet
+
+if command -v create-dmg >/dev/null; then
+    create-dmg \
+        --volname "$APP_NAME" \
+        --background scripts/assets/dmg-background.png \
+        --window-size 600 360 \
+        --icon-size 110 \
+        --icon "$APP_NAME.app" 150 165 \
+        --app-drop-link 450 165 \
+        --hide-extension "$APP_NAME.app" \
+        --no-internet-enable \
+        "$DMG" "$DMG_ROOT"
+else
+    echo "create-dmg not installed; falling back to a plain DMG" >&2
+    ln -s /Applications "$DMG_ROOT/Applications"
+    hdiutil create -volname "$APP_NAME" -srcfolder "$DMG_ROOT" -ov -format UDZO "$DMG" -quiet
+fi
 
 echo "==> Done"
 echo "App:  $STAGED"
