@@ -85,35 +85,18 @@ struct TranscriptHistoryView: View {
                 recordAwaitingFolder = nil
                 newFolderPrompted = true
             }
+            .help("New folder")
         }
     }
 
     private var recordList: some View {
         List(filteredRecords, selection: $selectedRecordID) { record in
-            VStack(alignment: .leading, spacing: 3) {
-                Text(record.title)
-                    .font(.headline)
-                    .lineLimit(1)
-                HStack(spacing: 6) {
-                    Text(record.startedAt, format: .dateTime.month().day().hour().minute())
-                    if record.duration > 0 {
-                        Text("·")
-                        Text("\(max(1, Int(record.duration / 60))) min")
-                    }
-                    if case .all = selection, let folder = record.folder {
-                        Text("·")
-                        Label(folder, systemImage: "folder")
-                            .labelStyle(.titleAndIcon)
-                    }
-                }
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .lineLimit(1)
-            }
-            .tag(record.id)
-            .contextMenu { moveMenu(for: record) }
+            MeetingRow(record: record, showsFolder: selection == .all)
+                .tag(record.id)
+                .contextMenu { moveMenu(for: record) }
         }
-        .navigationSplitViewColumnWidth(min: 230, ideal: 270)
+        .listStyle(.inset)
+        .navigationSplitViewColumnWidth(min: 240, ideal: 280)
         .searchable(text: $searchText, placement: .sidebar, prompt: "Search meetings")
         .toolbar {
             Button("Import meeting", systemImage: "square.and.arrow.down", action: model.presentImportPanel)
@@ -185,6 +168,53 @@ struct TranscriptHistoryView: View {
     }
 }
 
+// Mail-style row: title with the date right-aligned, then a quiet second line.
+private struct MeetingRow: View {
+    let record: TranscriptRecord
+    let showsFolder: Bool
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 3) {
+            HStack(alignment: .firstTextBaseline) {
+                Text(record.title)
+                    .font(.body.weight(.medium))
+                    .lineLimit(1)
+                Spacer(minLength: 8)
+                Text(Self.compactDate(record.startedAt))
+                    .font(.caption)
+                    .foregroundStyle(.tertiary)
+                    .layoutPriority(1)
+            }
+            HStack(spacing: 4) {
+                if record.duration > 0 {
+                    Text("\(max(1, Int(record.duration / 60))) min")
+                }
+                if showsFolder, let folder = record.folder {
+                    if record.duration > 0 { Text("·") }
+                    Text(folder)
+                }
+                if record.duration == 0, !showsFolder || record.folder == nil {
+                    Text(record.sourceApplication)
+                }
+            }
+            .font(.caption)
+            .foregroundStyle(.secondary)
+            .lineLimit(1)
+        }
+        .padding(.vertical, 4)
+    }
+
+    private static func compactDate(_ date: Date) -> String {
+        if Calendar.current.isDateInToday(date) {
+            return date.formatted(date: .omitted, time: .shortened)
+        }
+        if Calendar.current.isDate(date, equalTo: .now, toGranularity: .year) {
+            return date.formatted(.dateTime.month(.abbreviated).day())
+        }
+        return date.formatted(.dateTime.month(.abbreviated).day().year())
+    }
+}
+
 private struct NoteDetailView: View {
     private enum Tab: String {
         case notes = "Notes"
@@ -196,16 +226,44 @@ private struct NoteDetailView: View {
     @State private var tab: Tab = .notes
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            HStack {
-                VStack(alignment: .leading, spacing: 3) {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 0) {
+                VStack(alignment: .leading, spacing: 6) {
                     Text(record.title)
-                        .font(.title2.weight(.semibold))
+                        .font(.title.weight(.semibold))
+                        .textSelection(.enabled)
                     Text(subtitle)
-                        .font(.caption)
+                        .font(.callout)
                         .foregroundStyle(.secondary)
                 }
-                Spacer()
+                .padding(.bottom, 20)
+
+                if visibleTab == .notes, let analysis = record.analysis {
+                    MarkdownSectionsView(markdown: analysis)
+                } else {
+                    TranscriptView(text: record.text)
+                }
+            }
+            .frame(maxWidth: 640, alignment: .leading)
+            .padding(.horizontal, 32)
+            .padding(.vertical, 28)
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .id(record.id)
+        .background(Color(nsColor: .textBackgroundColor))
+        .toolbar {
+            ToolbarItem(placement: .principal) {
+                if record.analysis != nil {
+                    Picker("Section", selection: Binding(get: { visibleTab }, set: { tab = $0 })) {
+                        Text(Tab.notes.rawValue).tag(Tab.notes)
+                        Text(Tab.transcript.rawValue).tag(Tab.transcript)
+                    }
+                    .pickerStyle(.segmented)
+                    .labelsHidden()
+                    .frame(width: 180)
+                }
+            }
+            ToolbarItemGroup {
                 Button("Copy", systemImage: "doc.on.doc") {
                     if visibleTab == .notes, let analysis = record.analysis {
                         NSPasteboard.general.clearContents()
@@ -215,38 +273,11 @@ private struct NoteDetailView: View {
                     }
                 }
                 .help(visibleTab == .notes ? "Copy meeting notes" : "Copy transcript")
-                Button("Show file", systemImage: "arrow.forward.square") {
+                Button("Show in Finder", systemImage: "folder") {
                     NSWorkspace.shared.activateFileViewerSelecting([record.markdownURL])
                 }
+                .help("Show the note file in Finder")
             }
-            .padding(20)
-
-            Picker("Section", selection: Binding(get: { visibleTab }, set: { tab = $0 })) {
-                Text(Tab.notes.rawValue).tag(Tab.notes)
-                Text(Tab.transcript.rawValue).tag(Tab.transcript)
-            }
-            .pickerStyle(.segmented)
-            .labelsHidden()
-            .frame(maxWidth: 300)
-            .padding(.horizontal, 20)
-            .padding(.bottom, 12)
-            .disabled(record.analysis == nil)
-
-            Divider()
-
-            ScrollView {
-                VStack(alignment: .leading, spacing: 18) {
-                    if visibleTab == .notes, let analysis = record.analysis {
-                        MarkdownSectionsView(markdown: analysis)
-                    } else {
-                        TranscriptBodyView(text: record.text)
-                    }
-                }
-                .frame(maxWidth: 680, alignment: .leading)
-                .padding(24)
-                .frame(maxWidth: .infinity, alignment: .leading)
-            }
-            .id(record.id)
         }
     }
 
@@ -257,14 +288,15 @@ private struct NoteDetailView: View {
     }
 
     private var subtitle: String {
-        var parts = [record.sourceApplication, record.startedAt.formatted(date: .abbreviated, time: .shortened)]
+        var parts = [record.startedAt.formatted(date: .abbreviated, time: .shortened)]
         if record.duration > 0 {
             parts.append("\(max(1, Int(record.duration / 60))) min")
         }
+        parts.append(record.sourceApplication)
         if let folder = record.folder {
             parts.append(folder)
         }
-        return parts.joined(separator: " · ")
+        return parts.joined(separator: "  ·  ")
     }
 }
 
@@ -274,24 +306,31 @@ private struct MarkdownSectionsView: View {
     let markdown: String
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            ForEach(Array(markdown.components(separatedBy: "\n").enumerated()), id: \.offset) { _, line in
+        VStack(alignment: .leading, spacing: 10) {
+            ForEach(Array(markdown.components(separatedBy: "\n").enumerated()), id: \.offset) { index, line in
                 let trimmed = line.trimmingCharacters(in: .whitespaces)
                 if trimmed.hasPrefix("## ") {
                     Text(String(trimmed.dropFirst(3)))
-                        .font(.title3.weight(.semibold))
-                        .padding(.top, 6)
+                        .font(.headline)
+                        .foregroundStyle(.primary)
+                        .padding(.top, index == 0 ? 0 : 14)
                 } else if trimmed.hasPrefix("- [ ] ") || trimmed.hasPrefix("- [x] ") {
-                    HStack(alignment: .firstTextBaseline, spacing: 6) {
-                        Image(systemName: trimmed.hasPrefix("- [x] ") ? "checkmark.square" : "square")
-                            .foregroundStyle(.secondary)
+                    HStack(alignment: .firstTextBaseline, spacing: 8) {
+                        Image(systemName: trimmed.hasPrefix("- [x] ") ? "checkmark.square.fill" : "square")
+                            .font(.system(size: 12))
+                            .foregroundStyle(trimmed.hasPrefix("- [x] ") ? Color.accentColor : Color.secondary)
                         inlineText(String(trimmed.dropFirst(6)))
                     }
+                    .padding(.leading, 2)
                 } else if trimmed.hasPrefix("- ") {
-                    HStack(alignment: .firstTextBaseline, spacing: 6) {
-                        Text("•").foregroundStyle(.secondary)
+                    HStack(alignment: .firstTextBaseline, spacing: 8) {
+                        Circle()
+                            .fill(.tertiary)
+                            .frame(width: 4, height: 4)
+                            .offset(y: -3)
                         inlineText(String(trimmed.dropFirst(2)))
                     }
+                    .padding(.leading, 2)
                 } else if !trimmed.isEmpty {
                     inlineText(trimmed)
                 }
@@ -300,24 +339,71 @@ private struct MarkdownSectionsView: View {
         .textSelection(.enabled)
     }
 
-    private func inlineText(_ line: String) -> Text {
+    private func inlineText(_ line: String) -> some View {
         Text((try? AttributedString(markdown: line)) ?? AttributedString(line))
+            .font(.body)
+            .lineSpacing(3)
+            .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
 
-private struct TranscriptBodyView: View {
+// Renders "**Speaker** [0:00]" blocks as a conversation: speaker and time on
+// a quiet label line, the utterance as readable body text.
+private struct TranscriptView: View {
+    private struct Block: Identifiable {
+        let id: Int
+        let speaker: String?
+        let timestamp: String?
+        let text: String
+    }
+
     let text: String
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            ForEach(Array(text.components(separatedBy: "\n\n").enumerated()), id: \.offset) { _, paragraph in
-                Text((try? AttributedString(
-                    markdown: paragraph,
-                    options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace)
-                )) ?? AttributedString(paragraph))
-                .font(.body)
+        VStack(alignment: .leading, spacing: 16) {
+            ForEach(blocks) { block in
+                VStack(alignment: .leading, spacing: 4) {
+                    if let speaker = block.speaker {
+                        HStack(spacing: 6) {
+                            Text(speaker)
+                                .font(.caption.weight(.semibold))
+                                .foregroundStyle(speaker == "Me" ? Color.accentColor : Color.secondary)
+                            if let timestamp = block.timestamp {
+                                Text(timestamp)
+                                    .font(.caption.monospacedDigit())
+                                    .foregroundStyle(.tertiary)
+                            }
+                        }
+                    }
+                    Text(block.text)
+                        .font(.body)
+                        .lineSpacing(3)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
             }
         }
         .textSelection(.enabled)
+    }
+
+    private var blocks: [Block] {
+        text.components(separatedBy: "\n\n").enumerated().map { index, paragraph in
+            let lines = paragraph.components(separatedBy: "\n")
+            if let header = lines.first,
+               header.hasPrefix("**"),
+               let nameEnd = header.range(of: "**", range: header.index(header.startIndex, offsetBy: 2)..<header.endIndex) {
+                let speaker = String(header[header.index(header.startIndex, offsetBy: 2)..<nameEnd.lowerBound])
+                let remainder = header[nameEnd.upperBound...].trimmingCharacters(in: .whitespaces)
+                let timestamp = remainder.hasPrefix("[") && remainder.hasSuffix("]")
+                    ? String(remainder.dropFirst().dropLast())
+                    : nil
+                return Block(
+                    id: index,
+                    speaker: speaker,
+                    timestamp: timestamp,
+                    text: lines.dropFirst().joined(separator: "\n")
+                )
+            }
+            return Block(id: index, speaker: nil, timestamp: nil, text: paragraph)
+        }
     }
 }
