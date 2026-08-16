@@ -86,9 +86,17 @@ Run the focused test suite with:
 xcodebuild test -project MeetingRecorder.xcodeproj -scheme MeetingRecorder -destination 'platform=macOS'
 ```
 
+## Releasing
+
+Bump `CFBundleShortVersionString` in `MeetingRecorder/Resources/Info.plist`, commit, then run `./scripts/release.sh`. The script archives with Developer ID signing, notarizes and staples, builds the styled DMG, tags the version, and publishes a GitHub release with the DMG attached. Pass `--no-publish` to stop after the DMG. Requires the `meeting-recorder` notarytool keychain profile, `create-dmg`, and an authenticated `gh` CLI.
+
 ## Known limitations
 
 - Browser detection requires simultaneous input and output, so a meeting that starts completely silent may rely on its calendar prompt or appear only when call audio begins.
 - Recording includes all system audio playing on the selected display while capture is active. This avoids missing browser helper-process audio, but unrelated app sounds during the meeting can be included.
 - The currently open two-minute recovery chunk still needs normal finalization. If the app or Mac crashes, earlier finalized chunks remain in the hidden capture work directory, but automatic crash-recovery UI is not yet implemented.
 - Golden Gate is beta software. Audio-process behavior should be retested after each major beta update.
+
+## License
+
+[MIT](LICENSE)

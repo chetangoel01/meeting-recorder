@@ -1,9 +1,16 @@
 #!/bin/bash
-# Builds, signs (Developer ID), notarizes, staples, and packages Meeting Recorder.
-# Prereqs: paid Apple Developer team, notarytool keychain profile "meeting-recorder".
+# Builds, signs (Developer ID), notarizes, staples, packages, and publishes
+# Meeting Recorder as a GitHub release.
+# Prereqs: paid Apple Developer team, notarytool keychain profile
+# "meeting-recorder", gh CLI authenticated. Bump CFBundleShortVersionString in
+# project.yml before releasing; the version tag must not already exist.
+# Pass --no-publish to stop after building the DMG.
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
+
+PUBLISH=1
+[[ "${1:-}" == "--no-publish" ]] && PUBLISH=0
 
 TEAM_ID="P48VDW72LU"
 PROFILE="meeting-recorder"
@@ -11,6 +18,22 @@ BUILD_DIR="build/release"
 ARCHIVE="$BUILD_DIR/MeetingRecorder.xcarchive"
 EXPORT_DIR="$BUILD_DIR/export"
 APP_NAME="Meeting Recorder"
+
+VERSION=$(plutil -extract CFBundleShortVersionString raw MeetingRecorder/Resources/Info.plist)
+TAG="v$VERSION"
+
+if [[ $PUBLISH == 1 ]]; then
+    echo "==> Pre-flight for $TAG"
+    gh auth status >/dev/null
+    if git rev-parse "$TAG" >/dev/null 2>&1; then
+        echo "error: tag $TAG already exists — bump CFBundleShortVersionString first" >&2
+        exit 1
+    fi
+    if [[ -n "$(git status --porcelain)" ]]; then
+        echo "error: working tree is not clean — commit or stash before releasing" >&2
+        exit 1
+    fi
+fi
 
 rm -rf "$BUILD_DIR"
 mkdir -p "$BUILD_DIR"
@@ -65,7 +88,6 @@ echo "==> Verifying"
 spctl -a -vv --type execute "$STAGED"
 
 echo "==> Building DMG"
-VERSION=$(plutil -extract CFBundleShortVersionString raw "$STAGED/Contents/Info.plist" 2>/dev/null || echo "1.0")
 DMG="$BUILD_DIR/MeetingRecorder-$VERSION.dmg"
 DMG_ROOT="$BUILD_DIR/dmg-root"
 mkdir -p "$DMG_ROOT"
@@ -88,6 +110,19 @@ else
     hdiutil create -volname "$APP_NAME" -srcfolder "$DMG_ROOT" -ov -format UDZO "$DMG" -quiet
 fi
 
+if [[ $PUBLISH == 1 ]]; then
+    echo "==> Publishing $TAG"
+    git tag "$TAG"
+    git push origin main "$TAG"
+    gh release create "$TAG" \
+        "$DMG#Meeting Recorder $VERSION (signed + notarized DMG)" \
+        --title "Meeting Recorder $VERSION" \
+        --generate-notes
+fi
+
 echo "==> Done"
 echo "App:  $STAGED"
 echo "DMG:  $DMG"
+if [[ $PUBLISH == 1 ]]; then
+    gh release view "$TAG" --json url -q '.url'
+fi
