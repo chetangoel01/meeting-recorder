@@ -2,6 +2,12 @@
 
 Meeting Recorder is a native macOS utility that detects meeting-client audio activity, records both sides of the call, and turns each meeting into an analyzed Markdown note: a speaker-attributed transcript plus an LLM-written summary, decisions, action items, and open questions, filed into folders. Its primary controls expand from the MacBook camera notch.
 
+<p align="center">
+  <img src="docs/screenshots/notch-prompt.png" width="560" alt="Notch prompt asking to record a detected Google Meet call"><br>
+  <img src="docs/screenshots/notch-recording.png" width="520" alt="Recording state with elapsed time, mic and call-audio toggles, and stop button"><br>
+  <img src="docs/screenshots/library.png" width="760" alt="Meeting Library with folders, search, and an analyzed meeting note">
+</p>
+
 The app icon uses the same visual language as the overlay: a light blue waveform wrapped around a coral recording dot on a warm, friendly background. The complete macOS icon set lives in the asset catalog.
 
 There is no bot participant, hosted backend, or subscription. The app stores the OpenRouter key in Keychain and keeps meeting audio locally until transcription succeeds. Transcription and analysis both run through the user's own OpenRouter key.

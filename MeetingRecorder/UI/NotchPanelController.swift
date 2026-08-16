@@ -142,7 +142,7 @@ struct NotchLayout {
         case .idle:
             return CGSize(width: notchWidth, height: notchHeight)
         case .prompt:
-            return CGSize(width: max(notchWidth, 540), height: max(notchHeight + 4, 38))
+            return CGSize(width: max(notchWidth, 560), height: max(notchHeight + 4, 38))
         case .preparing, .saving:
             return CGSize(width: max(notchWidth, 420), height: max(notchHeight + 4, 38))
         case .recording:

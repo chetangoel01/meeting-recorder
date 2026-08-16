@@ -17,7 +17,7 @@ final class NotchLayoutTests: XCTestCase {
             notchHeight: 32
         )
 
-        XCTAssertEqual(size.width, 540)
+        XCTAssertEqual(size.width, 560)
         XCTAssertEqual(size.height, 38)
     }
 

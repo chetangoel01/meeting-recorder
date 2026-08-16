@@ -9,7 +9,7 @@ struct MeetingRecorderApp: App {
         MenuBarExtra {
             MenuBarContent(model: model)
         } label: {
-            Label("Meeting Recorder", systemImage: model.phase.isRecording ? "record.circle.fill" : "record.circle")
+            MenuBarIcon(isRecording: model.phase.isRecording)
         }
         .menuBarExtraStyle(.menu)
 
@@ -21,5 +21,27 @@ struct MeetingRecorderApp: App {
         Settings {
             SettingsView(model: model)
         }
+    }
+}
+
+private struct MenuBarIcon: View {
+    let isRecording: Bool
+    @Environment(\.openWindow) private var openWindow
+
+    var body: some View {
+        Label("Meeting Recorder", systemImage: isRecording ? "record.circle.fill" : "record.circle")
+            .task {
+#if DEBUG
+                if ProcessInfo.processInfo.arguments.contains("--demo-library") {
+                    openWindow(id: "transcripts")
+                    NSApp.activate(ignoringOtherApps: true)
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) {
+                        NSApp.windows
+                            .first { $0.title == "Meeting Library" }?
+                            .setFrame(NSRect(x: 306, y: 200, width: 900, height: 560), display: true)
+                    }
+                }
+#endif
+            }
     }
 }

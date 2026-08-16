@@ -64,11 +64,22 @@ final class AppModel: ObservableObject {
         analysisClient: AnalysisClient = AnalysisClient(),
         settings: AppSettings = AppSettings()
     ) {
+#if DEBUG
+        // Screenshot/demo isolation: point the whole store at a scratch root.
+        let arguments = ProcessInfo.processInfo.arguments
+        if let flagIndex = arguments.firstIndex(of: "--store-root"),
+           arguments.indices.contains(flagIndex + 1) {
+            self.store = TranscriptStore(rootURL: URL(filePath: arguments[flagIndex + 1]))
+        } else {
+            self.store = store
+        }
+#else
         self.store = store
+#endif
         self.transcriptionClient = transcriptionClient
         self.analysisClient = analysisClient
         self.settings = settings
-        recorder = ScreenAudioRecorder(store: store)
+        recorder = ScreenAudioRecorder(store: self.store)
     }
 
     func start() {

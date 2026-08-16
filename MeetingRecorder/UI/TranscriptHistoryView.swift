@@ -108,6 +108,7 @@ struct TranscriptHistoryView: View {
                 }
                 .font(.caption)
                 .foregroundStyle(.secondary)
+                .lineLimit(1)
             }
             .tag(record.id)
             .contextMenu { moveMenu(for: record) }
