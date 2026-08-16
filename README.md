@@ -6,6 +6,12 @@ The app icon uses the same visual language as the overlay: a light blue waveform
 
 There is no bot participant, hosted backend, or subscription. The app stores the OpenRouter key in Keychain and keeps meeting audio locally until transcription succeeds. Transcription and analysis both run through the user's own OpenRouter key.
 
+## Download
+
+Grab the latest signed and notarized DMG from [Releases](https://github.com/chetangoel01/meeting-recorder/releases), open it, and drag Meeting Recorder into Applications. If you launch it from the wrong place, the app offers to move itself.
+
+First launch: enter an [OpenRouter](https://openrouter.ai) API key in Settings, grant Microphone and Screen & System Audio Recording access, and optionally grant Calendar access so meetings are named from your calendar. Transcribing a one-hour meeting costs a few cents; the analysis pass costs well under a cent.
+
 ## Current scope
 
 - Detects Zoom, Microsoft Teams, Webex, and FaceTime native clients. Audio helper processes are folded into one stable client identity so a single call cannot queue duplicate prompts.
