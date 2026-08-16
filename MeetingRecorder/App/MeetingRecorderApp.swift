@@ -32,6 +32,11 @@ private struct MenuBarIcon: View {
         Label("Meeting Recorder", systemImage: isRecording ? "record.circle.fill" : "record.circle")
             .task {
 #if DEBUG
+                let arguments = ProcessInfo.processInfo.arguments
+                if let flagIndex = arguments.firstIndex(of: "--import"),
+                   arguments.indices.contains(flagIndex + 1) {
+                    AppModel.shared.importMeeting(from: URL(filePath: arguments[flagIndex + 1]))
+                }
                 if ProcessInfo.processInfo.arguments.contains("--demo-library") {
                     openWindow(id: "transcripts")
                     NSApp.activate(ignoringOtherApps: true)

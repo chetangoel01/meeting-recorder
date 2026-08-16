@@ -559,6 +559,9 @@ final class AppModel: ObservableObject {
                 note.analysisMarkdown = "## Summary\n\n_Analysis unavailable: \(error.localizedDescription)_"
                 record = (try? store.update(record, with: note)) ?? record
             }
+        } else if settings.analysisEnabled {
+            note.analysisMarkdown = "## Summary\n\n_Analysis skipped: no OpenRouter API key. Add one in Settings and re-import._"
+            record = (try? store.update(record, with: note)) ?? record
         }
 
         reloadTranscripts()

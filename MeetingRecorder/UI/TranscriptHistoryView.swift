@@ -221,7 +221,7 @@ private struct NoteDetailView: View {
             }
             .padding(20)
 
-            Picker("Section", selection: $tab) {
+            Picker("Section", selection: Binding(get: { visibleTab }, set: { tab = $0 })) {
                 Text(Tab.notes.rawValue).tag(Tab.notes)
                 Text(Tab.transcript.rawValue).tag(Tab.transcript)
             }
