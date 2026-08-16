@@ -12,6 +12,9 @@ struct MenuBarContent: View {
                 .disabled(!isIdle)
         }
 
+        Button("Import meeting…", systemImage: "square.and.arrow.down", action: model.presentImportPanel)
+            .disabled(!isIdle)
+
         Divider()
 
         Button("Meeting library…", systemImage: "text.document") {

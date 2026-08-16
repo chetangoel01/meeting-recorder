@@ -115,6 +115,11 @@ struct TranscriptHistoryView: View {
         }
         .navigationSplitViewColumnWidth(min: 230, ideal: 270)
         .searchable(text: $searchText, placement: .sidebar, prompt: "Search meetings")
+        .toolbar {
+            Button("Import meeting", systemImage: "square.and.arrow.down", action: model.presentImportPanel)
+                .disabled(!model.phase.isIdle)
+                .help("Import an audio recording or a transcript file")
+        }
         .overlay {
             if filteredRecords.isEmpty {
                 ContentUnavailableView(
@@ -181,8 +186,14 @@ struct TranscriptHistoryView: View {
 }
 
 private struct NoteDetailView: View {
+    private enum Tab: String {
+        case notes = "Notes"
+        case transcript = "Transcript"
+    }
+
     @ObservedObject var model: AppModel
     let record: TranscriptRecord
+    @State private var tab: Tab = .notes
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -196,31 +207,53 @@ private struct NoteDetailView: View {
                 }
                 Spacer()
                 Button("Copy", systemImage: "doc.on.doc") {
-                    model.copyTranscript(record)
+                    if visibleTab == .notes, let analysis = record.analysis {
+                        NSPasteboard.general.clearContents()
+                        NSPasteboard.general.setString(analysis, forType: .string)
+                    } else {
+                        model.copyTranscript(record)
+                    }
                 }
+                .help(visibleTab == .notes ? "Copy meeting notes" : "Copy transcript")
                 Button("Show file", systemImage: "arrow.forward.square") {
                     NSWorkspace.shared.activateFileViewerSelecting([record.markdownURL])
                 }
             }
             .padding(20)
 
+            Picker("Section", selection: $tab) {
+                Text(Tab.notes.rawValue).tag(Tab.notes)
+                Text(Tab.transcript.rawValue).tag(Tab.transcript)
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            .frame(maxWidth: 300)
+            .padding(.horizontal, 20)
+            .padding(.bottom, 12)
+            .disabled(record.analysis == nil)
+
             Divider()
 
             ScrollView {
                 VStack(alignment: .leading, spacing: 18) {
-                    if let analysis = record.analysis {
+                    if visibleTab == .notes, let analysis = record.analysis {
                         MarkdownSectionsView(markdown: analysis)
-                        Divider()
-                        Text("Transcript")
-                            .font(.title3.weight(.semibold))
+                    } else {
+                        TranscriptBodyView(text: record.text)
                     }
-                    TranscriptBodyView(text: record.text)
                 }
                 .frame(maxWidth: 680, alignment: .leading)
                 .padding(24)
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
+            .id(record.id)
         }
+    }
+
+    // Notes-less records (legacy imports, analysis disabled) read as
+    // transcript-only regardless of the picker's stored state.
+    private var visibleTab: Tab {
+        record.analysis == nil ? .transcript : tab
     }
 
     private var subtitle: String {

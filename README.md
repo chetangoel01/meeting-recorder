@@ -28,10 +28,11 @@ First launch: enter an [OpenRouter](https://openrouter.ai) API key in Settings, 
 - During recording, microphone and call-audio buttons independently include or exclude each source from the saved recording.
 - Captures system audio and microphone samples directly through ScreenCaptureKit, then writes independent two-minute M4A recovery chunks instead of relying on ScreenCaptureKit's recording-output wrapper.
 - Transcribes the microphone and call-audio tracks separately when both sides spoke, interleaving them into **Me** / **Them** blocks with timestamps at two-minute granularity. Near-silent chunks are dropped before upload so Whisper cannot hallucinate filler on them. Single-source recordings fall back to a plain combined transcript in eight-minute chunks.
-- Runs an LLM analysis pass after every transcription (optional, on by default): summary, decisions, action items, and open questions are written above the transcript, the meeting gets a short title, and the note is filed into a suggested folder. Analysis failures degrade to a plain transcript; they never lose one.
+- Runs an LLM analysis pass after every transcription (optional, on by default): a detailed narrative summary, key details, decisions, action items, and open questions, plus a short title and a suggested folder. The notes prompt is fully editable in Settings — change the sections, tone, language, or detail level; titling and folder routing keep working regardless. Analysis failures degrade to a plain transcript; they never lose one.
 - Names meetings from the overlapping calendar event when Calendar access is granted, including attendees in the analysis context.
-- Stores notes as Markdown with YAML frontmatter in `~/Library/Application Support/Meeting Recorder/Transcripts`, one subdirectory per folder. Notes created by older versions load unchanged.
-- Ships a Meeting Library window: folder sidebar, full-text search across titles, transcripts, and analysis, a note viewer, and context-menu filing (move between folders, create folders, trash).
+- Stores each meeting as two Markdown files: the note (frontmatter + analysis) and a linked `.transcript.md` sibling, in `~/Library/Application Support/Meeting Recorder/Transcripts` with one subdirectory per folder. The library viewer switches between Notes and Transcript tabs. Notes created by older versions load unchanged.
+- Ships a Meeting Library window: folder sidebar, full-text search across titles, transcripts, and analysis, a tabbed note viewer, and context-menu filing (move between folders, create folders, trash).
+- Imports existing meetings: an audio file (any common format) runs through transcription and analysis; a `.txt`/`.md` transcript skips straight to analysis. Import from the menu bar or the library toolbar.
 - Optionally copies every finished note into an Obsidian vault folder.
 - Retains source audio after any recording or transcription failure.
 

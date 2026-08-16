@@ -11,10 +11,12 @@ struct MeetingNote: Sendable {
     var audioFilename: String?
     var analysisMarkdown: String?
     var transcriptMarkdown: String
+    var transcriptFilename: String?
 
-    // Renders the canonical on-disk Markdown: YAML frontmatter (readable in
-    // Obsidian) followed by analysis sections and the transcript.
-    func rendered() -> String {
+    // The note file carries frontmatter, the title, and the analysis; the
+    // transcript lives in a sibling file referenced by `transcript:` so notes
+    // stay readable (in the app and in Obsidian) without a wall of dialogue.
+    func renderedNote() -> String {
         var frontmatter = [
             "id: \(id.uuidString)",
             "title: \"\(title.replacingOccurrences(of: "\"", with: "'"))\"",
@@ -28,14 +30,25 @@ struct MeetingNote: Sendable {
         if let audioFilename {
             frontmatter.append("audio: \"\(audioFilename)\"")
         }
+        if let transcriptFilename {
+            frontmatter.append("transcript: \"\(transcriptFilename)\"")
+        }
 
         var body = "# \(title)\n"
         if let analysisMarkdown, !analysisMarkdown.isEmpty {
             body += "\n\(analysisMarkdown.trimmingCharacters(in: .whitespacesAndNewlines))\n"
         }
-        body += "\n## Transcript\n\n\(transcriptMarkdown.trimmingCharacters(in: .whitespacesAndNewlines))\n"
+        if let transcriptFilename {
+            body += "\n[Transcript](\(transcriptFilename))\n"
+        } else {
+            body += "\n## Transcript\n\n\(transcriptMarkdown.trimmingCharacters(in: .whitespacesAndNewlines))\n"
+        }
 
         return "---\n\(frontmatter.joined(separator: "\n"))\n---\n\n\(body)"
+    }
+
+    func renderedTranscript() -> String {
+        transcriptMarkdown.trimmingCharacters(in: .whitespacesAndNewlines) + "\n"
     }
 
     static func parse(_ text: String, fileURL: URL, fallbackDate: Date) -> MeetingNote {
@@ -60,7 +73,7 @@ struct MeetingNote: Sendable {
             ?? body.split(separator: "\n").first { $0.hasPrefix("# ") }.map { String($0.dropFirst(2)) }
             ?? fileURL.deletingPathExtension().lastPathComponent
 
-        let (analysis, transcript) = splitBody(body)
+        let (analysis, inlineTranscript) = splitBody(body, hasTranscriptSibling: fields["transcript"] != nil)
 
         return MeetingNote(
             id: fields["id"].flatMap(UUID.init(uuidString:)) ?? Self.stableID(for: fileURL),
@@ -71,7 +84,8 @@ struct MeetingNote: Sendable {
             cost: fields["openrouter_cost_usd"].flatMap(Double.init),
             audioFilename: fields["audio"],
             analysisMarkdown: analysis,
-            transcriptMarkdown: transcript
+            transcriptMarkdown: inlineTranscript,
+            transcriptFilename: fields["transcript"]
         )
     }
 
@@ -83,17 +97,26 @@ struct MeetingNote: Sendable {
         return NSUUID(uuidBytes: bytes) as UUID
     }
 
-    private static func splitBody(_ body: String) -> (analysis: String?, transcript: String) {
-        guard let transcriptRange = body.range(of: "## Transcript") else {
-            return (nil, body.trimmingCharacters(in: .whitespacesAndNewlines))
+    private static func splitBody(_ body: String, hasTranscriptSibling: Bool) -> (analysis: String?, transcript: String) {
+        var transcript = ""
+        var head = body
+        if let transcriptRange = body.range(of: "## Transcript") {
+            transcript = body[transcriptRange.upperBound...]
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            head = String(body[..<transcriptRange.lowerBound])
         }
-        let transcript = body[transcriptRange.upperBound...]
-            .trimmingCharacters(in: .whitespacesAndNewlines)
 
-        var head = String(body[..<transcriptRange.lowerBound])
-            .trimmingCharacters(in: .whitespacesAndNewlines)
+        head = head.trimmingCharacters(in: .whitespacesAndNewlines)
         if head.hasPrefix("# "), let newline = head.firstIndex(of: "\n") {
             head = String(head[head.index(after: newline)...])
+        }
+        if hasTranscriptSibling {
+            // Drop the trailing "[Transcript](...)" navigation link; it is
+            // rendering plumbing, not analysis content.
+            head = head
+                .components(separatedBy: "\n")
+                .filter { !$0.trimmingCharacters(in: .whitespaces).hasPrefix("[Transcript](") }
+                .joined(separator: "\n")
         }
         // Old notes put "- Recorded:" metadata bullets here; they are covered
         // by frontmatter now, so only heading-led content counts as analysis.
@@ -112,6 +135,8 @@ struct MeetingNote: Sendable {
 }
 
 struct TranscriptStore: Sendable {
+    static let transcriptSuffix = ".transcript.md"
+
     let rootURL: URL
 
     init(rootURL: URL? = nil) {
@@ -179,11 +204,21 @@ struct TranscriptStore: Sendable {
         let destination = destinationDirectory.appending(path: record.markdownURL.lastPathComponent)
         guard destination != record.markdownURL else { return destination }
         try FileManager.default.moveItem(at: record.markdownURL, to: destination)
+        if let sibling = Self.existingTranscriptURL(forNoteAt: record.markdownURL) {
+            try? FileManager.default.moveItem(
+                at: sibling,
+                to: destinationDirectory.appending(path: sibling.lastPathComponent)
+            )
+        }
         return destination
     }
 
     func trash(_ record: TranscriptRecord) throws {
+        let sibling = Self.existingTranscriptURL(forNoteAt: record.markdownURL)
         try FileManager.default.trashItem(at: record.markdownURL, resultingItemURL: nil)
+        if let sibling {
+            try? FileManager.default.trashItem(at: sibling, resultingItemURL: nil)
+        }
     }
 
     // MARK: - Notes
@@ -201,25 +236,56 @@ struct TranscriptStore: Sendable {
             directory = transcriptsURL
         }
 
-        let markdownURL = directory.appending(
-            path: "\(Self.filenameTimestamp(note.startedAt))-\(Self.safeFilename(note.title)).md"
+        let baseName = "\(Self.filenameTimestamp(note.startedAt))-\(Self.safeFilename(note.title))"
+        var savedNote = note
+        savedNote.transcriptFilename = baseName + Self.transcriptSuffix
+
+        let markdownURL = directory.appending(path: "\(baseName).md")
+        try savedNote.renderedTranscript().write(
+            to: directory.appending(path: savedNote.transcriptFilename!),
+            atomically: true,
+            encoding: .utf8
         )
-        try note.rendered().write(to: markdownURL, atomically: true, encoding: .utf8)
-        return record(for: note, at: markdownURL, folder: cleanedFolder)
+        try savedNote.renderedNote().write(to: markdownURL, atomically: true, encoding: .utf8)
+        return record(for: savedNote, at: markdownURL, folder: cleanedFolder)
     }
 
-    // Rewrites an existing note in place (used to add analysis after the
-    // transcript is already safely on disk).
+    // Rewrites the note file in place (used to add analysis after the
+    // transcript is already safely on disk). The transcript sibling is not
+    // rewritten — except for legacy inline notes, which gain one here so the
+    // upgrade to the two-file shape never drops a transcript.
     func update(_ record: TranscriptRecord, with note: MeetingNote) throws -> TranscriptRecord {
-        try note.rendered().write(to: record.markdownURL, atomically: true, encoding: .utf8)
-        return self.record(for: note, at: record.markdownURL, folder: record.folder)
+        var updatedNote = note
+        let directory = record.markdownURL.deletingLastPathComponent()
+        if updatedNote.transcriptFilename == nil {
+            let filename = record.markdownURL.deletingPathExtension().lastPathComponent + Self.transcriptSuffix
+            try updatedNote.renderedTranscript().write(
+                to: directory.appending(path: filename),
+                atomically: true,
+                encoding: .utf8
+            )
+            updatedNote.transcriptFilename = filename
+        }
+        try updatedNote.renderedNote().write(to: record.markdownURL, atomically: true, encoding: .utf8)
+        return self.record(for: updatedNote, at: record.markdownURL, folder: record.folder)
     }
 
     func exportCopy(of record: TranscriptRecord, to directory: URL) throws {
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        let destination = directory.appending(path: record.markdownURL.lastPathComponent)
         let contents = try String(contentsOf: record.markdownURL, encoding: .utf8)
-        try contents.write(to: destination, atomically: true, encoding: .utf8)
+        try contents.write(
+            to: directory.appending(path: record.markdownURL.lastPathComponent),
+            atomically: true,
+            encoding: .utf8
+        )
+        if let sibling = Self.existingTranscriptURL(forNoteAt: record.markdownURL) {
+            let transcriptContents = try String(contentsOf: sibling, encoding: .utf8)
+            try transcriptContents.write(
+                to: directory.appending(path: sibling.lastPathComponent),
+                atomically: true,
+                encoding: .utf8
+            )
+        }
     }
 
     func loadTranscripts() -> [TranscriptRecord] {
@@ -240,15 +306,24 @@ struct TranscriptStore: Sendable {
         )) ?? []
 
         return urls
-            .filter { $0.pathExtension.lowercased() == "md" }
+            .filter {
+                $0.pathExtension.lowercased() == "md"
+                    && !$0.lastPathComponent.lowercased().hasSuffix(Self.transcriptSuffix)
+            }
             .compactMap { url -> TranscriptRecord? in
                 guard let text = try? String(contentsOf: url, encoding: .utf8) else { return nil }
                 let values = try? url.resourceValues(forKeys: [.contentModificationDateKey])
-                let note = MeetingNote.parse(
+                var note = MeetingNote.parse(
                     text,
                     fileURL: url,
                     fallbackDate: values?.contentModificationDate ?? .distantPast
                 )
+                if let transcriptFilename = note.transcriptFilename {
+                    let siblingURL = directory.appending(path: transcriptFilename)
+                    if let transcript = try? String(contentsOf: siblingURL, encoding: .utf8) {
+                        note.transcriptMarkdown = transcript.trimmingCharacters(in: .whitespacesAndNewlines)
+                    }
+                }
                 return record(for: note, at: url, folder: folder)
             }
     }
@@ -267,6 +342,11 @@ struct TranscriptStore: Sendable {
             audioURL: note.audioFilename.map { recordingsURL.appending(path: $0) },
             folder: folder
         )
+    }
+
+    private static func existingTranscriptURL(forNoteAt noteURL: URL) -> URL? {
+        let candidate = noteURL.deletingPathExtension().appendingPathExtension("transcript.md")
+        return FileManager.default.fileExists(atPath: candidate.path) ? candidate : nil
     }
 
     static func safeFolderName(_ value: String) -> String {

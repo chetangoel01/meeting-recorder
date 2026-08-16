@@ -4,6 +4,7 @@ import CoreGraphics
 import EventKit
 import Foundation
 import ServiceManagement
+import UniformTypeIdentifiers
 
 @MainActor
 final class AppModel: ObservableObject {
@@ -305,6 +306,121 @@ final class AppModel: ObservableObject {
         NSPasteboard.general.setString(record.text, forType: .string)
     }
 
+    // MARK: - Import
+
+    func presentImportPanel() {
+        guard phase.isIdle else { return }
+        let panel = NSOpenPanel()
+        panel.canChooseDirectories = false
+        panel.allowsMultipleSelection = false
+        panel.message = "Choose a meeting recording (audio) or a transcript (.txt/.md)."
+        panel.allowedContentTypes = [.audio, .plainText]
+        NSApp.activate(ignoringOtherApps: true)
+        panel.begin { [weak self] response in
+            guard response == .OK, let url = panel.url else { return }
+            Task { @MainActor in self?.importMeeting(from: url) }
+        }
+    }
+
+    func importMeeting(from url: URL) {
+        guard phase.isIdle else { return }
+        switch ImportKind.classify(url) {
+        case .transcript:
+            importTranscript(url)
+        case .audio:
+            importAudio(url)
+        }
+    }
+
+    private func importTranscript(_ url: URL) {
+        guard let text = try? String(contentsOf: url, encoding: .utf8),
+              !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        else {
+            phase = .failed(message: "The transcript file could not be read.", audioURL: nil)
+            return
+        }
+
+        let session = RecordingSession(
+            candidate: MeetingCandidate(
+                id: "import:text",
+                appName: "Imported transcript",
+                bundleIdentifier: nil,
+                processIdentifier: nil,
+                trigger: .manual
+            ),
+            startedAt: Self.fileDate(of: url)
+        )
+        currentSession = session
+        currentAudioURL = nil
+        currentArtifacts = nil
+        phase = .analyzing
+
+        Task {
+            do {
+                let note = MeetingNote(
+                    id: UUID(),
+                    title: url.deletingPathExtension().lastPathComponent,
+                    sourceApplication: session.candidate.appName,
+                    startedAt: session.startedAt,
+                    duration: 0,
+                    cost: nil,
+                    audioFilename: nil,
+                    analysisMarkdown: nil,
+                    transcriptMarkdown: text.trimmingCharacters(in: .whitespacesAndNewlines),
+                    transcriptFilename: nil
+                )
+                try await finalize(
+                    note: note,
+                    calendarEvent: nil,
+                    apiKey: KeychainStore.loadAPIKey()
+                )
+            } catch {
+                presentPendingCandidateOr(
+                    .failed(message: error.localizedDescription, audioURL: nil)
+                )
+            }
+        }
+    }
+
+    private func importAudio(_ url: URL) {
+        let session = RecordingSession(
+            candidate: MeetingCandidate(
+                id: "import:audio",
+                appName: "Imported recording",
+                bundleIdentifier: nil,
+                processIdentifier: nil,
+                trigger: .manual
+            ),
+            startedAt: Self.fileDate(of: url)
+        )
+        currentSession = session
+        phase = .saving
+
+        Task {
+            do {
+                let fileExtension = url.pathExtension.isEmpty ? "m4a" : url.pathExtension
+                let copyURL = try store.newRecordingURL(extension: fileExtension, suffix: "import")
+                try FileManager.default.copyItem(at: url, to: copyURL)
+                let artifacts = RecordingArtifacts(
+                    combinedURL: copyURL,
+                    microphoneURL: nil,
+                    systemURL: nil
+                )
+                currentAudioURL = copyURL
+                currentArtifacts = artifacts
+                try await processRecording(artifacts: artifacts, session: session)
+            } catch {
+                presentPendingCandidateOr(
+                    .failed(message: error.localizedDescription, audioURL: currentAudioURL)
+                )
+            }
+        }
+    }
+
+    private static func fileDate(of url: URL) -> Date {
+        (try? url.resourceValues(forKeys: [.creationDateKey]))?.creationDate ?? .now
+    }
+
     // MARK: - Library
 
     func reloadTranscripts() {
@@ -369,12 +485,15 @@ final class AppModel: ObservableObject {
             throw RecordingError.exportFailed
         }
 
-        let calendarEvent = calendarMonitor.eventMatching(
+        // Imported files carry transfer dates, not meeting times, so calendar
+        // matching would confidently mistitle them — only live recordings match.
+        let isImport = session.candidate.id.hasPrefix("import:")
+        let calendarEvent = isImport ? nil : calendarMonitor.eventMatching(
             start: session.startedAt,
             end: session.startedAt.addingTimeInterval(duration)
         )
         let keptAudioURL = settings.keepRecordings ? artifacts.combinedURL : nil
-        var note = MeetingNote(
+        let note = MeetingNote(
             id: UUID(),
             title: calendarEvent?.title ?? "\(session.candidate.appName) meeting",
             sourceApplication: session.candidate.appName,
@@ -383,35 +502,54 @@ final class AppModel: ObservableObject {
             cost: transcriptionCost,
             audioFilename: keptAudioURL?.lastPathComponent,
             analysisMarkdown: nil,
-            transcriptMarkdown: transcriptMarkdown
+            transcriptMarkdown: transcriptMarkdown,
+            transcriptFilename: nil
         )
-        // The transcript is on disk before analysis begins; a crash or API
-        // failure past this point can no longer lose paid transcription work.
-        var record = try store.save(note, folder: nil)
+        try await finalize(note: note, calendarEvent: calendarEvent, apiKey: apiKey)
 
-        if settings.analysisEnabled {
+        if !settings.keepRecordings {
+            try? FileManager.default.removeItem(at: artifacts.combinedURL)
+        }
+        for trackURL in artifacts.trackURLs {
+            try? FileManager.default.removeItem(at: trackURL)
+        }
+        currentAudioURL = keptAudioURL
+        currentArtifacts = nil
+    }
+
+    // Shared tail for recordings and imports: save the raw note first, then
+    // analyze, retitle, file, and export. Analysis failures degrade the note,
+    // never lose it.
+    private func finalize(note: MeetingNote, calendarEvent: MatchedCalendarEvent?, apiKey: String?) async throws {
+        var note = note
+        var record = try store.save(note, folder: nil)
+        note.transcriptFilename = record.markdownURL
+            .deletingPathExtension().lastPathComponent + TranscriptStore.transcriptSuffix
+
+        if settings.analysisEnabled, let apiKey {
             phase = .analyzing
             do {
                 let context = AnalysisContext(
                     fallbackTitle: note.title,
-                    sourceApplication: session.candidate.appName,
-                    startedAt: session.startedAt,
-                    duration: duration,
+                    sourceApplication: note.sourceApplication,
+                    startedAt: note.startedAt,
+                    duration: note.duration,
                     calendarEvent: calendarEvent,
                     existingFolders: store.folders()
                 )
                 let (outcome, analysisCost) = try await analysisClient.analyze(
-                    transcript: transcriptMarkdown,
+                    transcript: note.transcriptMarkdown,
                     context: context,
                     apiKey: apiKey,
-                    model: settings.analysisModel
+                    model: settings.analysisModel,
+                    instructions: settings.analysisPrompt
                 )
                 if calendarEvent == nil, let title = outcome.title {
                     note.title = title
                 }
                 note.analysisMarkdown = outcome.analysisMarkdown
-                if transcriptionCost != nil || analysisCost != nil {
-                    note.cost = (transcriptionCost ?? 0) + (analysisCost ?? 0)
+                if note.cost != nil || analysisCost != nil {
+                    note.cost = (note.cost ?? 0) + (analysisCost ?? 0)
                 }
                 record = try store.update(record, with: note)
                 if let folder = outcome.suggestedFolder {
@@ -429,15 +567,6 @@ final class AppModel: ObservableObject {
         if settings.obsidianExportEnabled, !settings.obsidianExportPath.isEmpty {
             try? store.exportCopy(of: finalRecord, to: URL(filePath: settings.obsidianExportPath))
         }
-
-        if !settings.keepRecordings {
-            try? FileManager.default.removeItem(at: artifacts.combinedURL)
-        }
-        for trackURL in artifacts.trackURLs {
-            try? FileManager.default.removeItem(at: trackURL)
-        }
-        currentAudioURL = keptAudioURL
-        currentArtifacts = nil
         presentPendingCandidateOr(.completed(finalRecord))
     }
 

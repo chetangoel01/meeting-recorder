@@ -89,7 +89,26 @@ struct SettingsView: View {
                 if settings.analysisEnabled {
                     TextField("Analysis model", text: $settings.analysisModel)
                         .textFieldStyle(.roundedBorder)
-                    Text("Adds a summary, decisions, action items, and open questions to each note, names the meeting, and files it into a folder. Uses the same OpenRouter key.")
+                    Text("Writes detailed meeting notes next to each transcript, names the meeting, and files it into a folder. Uses the same OpenRouter key.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+
+                    LabeledContent("Notes prompt") {
+                        VStack(alignment: .trailing, spacing: 6) {
+                            TextEditor(text: $settings.analysisPrompt)
+                                .font(.system(.caption, design: .monospaced))
+                                .frame(height: 150)
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 6)
+                                        .stroke(Color.secondary.opacity(0.3), lineWidth: 1)
+                                )
+                            Button("Reset to default") {
+                                settings.analysisPrompt = AnalysisClient.defaultInstructions
+                            }
+                            .disabled(settings.analysisPrompt == AnalysisClient.defaultInstructions)
+                        }
+                    }
+                    Text("Edit how notes are written — sections, tone, language, level of detail. The meeting title and folder still come back automatically. Test changes by importing a transcript.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }

@@ -67,7 +67,8 @@ struct AnalysisClient: Sendable {
         transcript: String,
         context: AnalysisContext,
         apiKey: String,
-        model: String
+        model: String,
+        instructions: String = AnalysisClient.defaultInstructions
     ) async throws -> (outcome: AnalysisOutcome, cost: Double?) {
         var trimmedTranscript = transcript
         if trimmedTranscript.count > maximumTranscriptCharacters {
@@ -78,7 +79,7 @@ struct AnalysisClient: Sendable {
         let requestBody = RequestBody(
             model: model,
             messages: [
-                .init(role: "system", content: Self.systemPrompt),
+                .init(role: "system", content: Self.systemPrompt(instructions: instructions)),
                 .init(role: "user", content: Self.userPrompt(transcript: trimmedTranscript, context: context)),
             ]
         )
@@ -123,31 +124,54 @@ struct AnalysisClient: Sendable {
         throw lastError ?? TranscriptionError.invalidResponse
     }
 
-    static let systemPrompt = """
-    You turn raw meeting transcripts into concise, factual meeting notes. In the transcript, \
-    "Me" is the person who recorded the meeting and "Them" is everyone else on the call; \
-    plain transcripts without labels contain both sides mixed together.
+    // The user-editable half of the system prompt. The reply-shape contract
+    // (Title:/Folder: routing lines) is appended in code so a customized
+    // prompt can change tone and sections without breaking parsing.
+    static let defaultInstructions = """
+    You turn raw meeting transcripts into meeting notes detailed enough to replace attending \
+    the meeting. In the transcript, "Me" is the person who recorded it and "Them" is everyone \
+    else on the call; transcripts without labels contain both sides mixed together.
 
-    Reply in exactly this shape, with no preamble:
-
-    Title: <a short specific meeting title, at most 8 words>
-    Folder: <the best-fitting folder from the provided list, or a sensible new one-or-two-word folder name, or "none">
+    Write these Markdown sections, omitting any section that would be empty:
 
     ## Summary
-    3-6 sentences covering what the meeting was about and what happened.
+    A thorough narrative of the meeting, one paragraph per major topic in the order discussed. \
+    For each topic cover what was proposed, the reasoning and any disagreement, and how it \
+    resolved. Length should scale with the meeting: a quick call may need one paragraph, a \
+    long working session six or more. Do not compress to the point of losing substance.
+
+    ## Key details
+    Bullets for concrete specifics worth finding again later: numbers, dates, names, amounts, \
+    deadlines, links, and exact commitments, quoted or closely paraphrased.
 
     ## Decisions
-    - One bullet per decision actually made. Omit this entire section if none were made.
+    One bullet per decision actually made, with enough context to stand alone.
 
     ## Action items
-    - [ ] Task — owner if stated, due date if stated. Omit this entire section if there are none.
+    - [ ] Task — owner if stated, due date if stated.
 
     ## Open questions
-    - One bullet per unresolved question. Omit this entire section if there are none.
+    One bullet per unresolved question or explicitly deferred topic.
 
     Never invent facts, decisions, owners, or dates that are not in the transcript. Ignore \
-    obvious transcription artifacts such as stray filler phrases on otherwise silent audio.
+    transcription artifacts such as stray filler phrases on otherwise silent audio.
     """
+
+    static func systemPrompt(instructions: String) -> String {
+        let trimmed = instructions.trimmingCharacters(in: .whitespacesAndNewlines)
+        let effective = trimmed.isEmpty ? defaultInstructions : trimmed
+        return """
+        \(effective)
+
+        Reply in exactly this shape, with no preamble:
+
+        Title: <a short specific meeting title, at most 8 words>
+        Folder: <the best-fitting folder from the provided list, or a sensible new \
+        one-or-two-word folder name, or "none">
+
+        <your meeting notes as Markdown sections>
+        """
+    }
 
     static func userPrompt(transcript: String, context: AnalysisContext) -> String {
         var details = [

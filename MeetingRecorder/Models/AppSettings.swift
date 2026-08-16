@@ -9,6 +9,7 @@ final class AppSettings: ObservableObject {
         static let transcriptionModel = "transcriptionModel"
         static let analysisEnabled = "analysisEnabled"
         static let analysisModel = "analysisModel"
+        static let analysisPrompt = "analysisPrompt"
         static let obsidianExportEnabled = "obsidianExportEnabled"
         static let obsidianExportPath = "obsidianExportPath"
     }
@@ -37,6 +38,10 @@ final class AppSettings: ObservableObject {
         didSet { defaults.set(analysisModel, forKey: Key.analysisModel) }
     }
 
+    @Published var analysisPrompt: String {
+        didSet { defaults.set(analysisPrompt, forKey: Key.analysisPrompt) }
+    }
+
     @Published var obsidianExportEnabled: Bool {
         didSet { defaults.set(obsidianExportEnabled, forKey: Key.obsidianExportEnabled) }
     }
@@ -59,6 +64,7 @@ final class AppSettings: ObservableObject {
         transcriptionModel = defaults.string(forKey: Key.transcriptionModel) ?? "openai/whisper-large-v3"
         analysisEnabled = defaults.object(forKey: Key.analysisEnabled) as? Bool ?? true
         analysisModel = defaults.string(forKey: Key.analysisModel) ?? "deepseek/deepseek-v4-pro"
+        analysisPrompt = defaults.string(forKey: Key.analysisPrompt) ?? AnalysisClient.defaultInstructions
         obsidianExportEnabled = defaults.object(forKey: Key.obsidianExportEnabled) as? Bool ?? false
         obsidianExportPath = defaults.string(forKey: Key.obsidianExportPath) ?? ""
     }

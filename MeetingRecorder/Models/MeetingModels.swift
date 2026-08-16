@@ -28,6 +28,16 @@ struct RecordingSession: Equatable, Sendable {
     let startedAt: Date
 }
 
+enum ImportKind: Equatable {
+    case transcript
+    case audio
+
+    static func classify(_ url: URL) -> ImportKind {
+        let textExtensions: Set<String> = ["txt", "md", "markdown", "text"]
+        return textExtensions.contains(url.pathExtension.lowercased()) ? .transcript : .audio
+    }
+}
+
 struct TranscriptRecord: Codable, Identifiable, Equatable, Sendable {
     let id: UUID
     let title: String

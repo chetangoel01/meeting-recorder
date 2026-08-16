@@ -53,4 +53,27 @@ final class AnalysisOutcomeTests: XCTestCase {
         )
         XCTAssertEqual(outcome.suggestedFolder, "Client-Acme")
     }
+
+    func testSystemPromptKeepsRoutingContractOutsideCustomInstructions() {
+        let custom = "Summarize in French, three paragraphs minimum."
+        let prompt = AnalysisClient.systemPrompt(instructions: custom)
+
+        XCTAssertTrue(prompt.hasPrefix(custom))
+        XCTAssertTrue(prompt.contains("Title: <"), "Custom prompts must keep the Title routing line")
+        XCTAssertTrue(prompt.contains("Folder: <"), "Custom prompts must keep the Folder routing line")
+
+        let emptied = AnalysisClient.systemPrompt(instructions: "   \n")
+        XCTAssertTrue(
+            emptied.hasPrefix(AnalysisClient.defaultInstructions.prefix(40)),
+            "A blank prompt falls back to the default instructions"
+        )
+    }
+
+    func testImportKindClassifiesByExtension() {
+        XCTAssertEqual(ImportKind.classify(URL(filePath: "/tmp/meeting.txt")), .transcript)
+        XCTAssertEqual(ImportKind.classify(URL(filePath: "/tmp/meeting.MD")), .transcript)
+        XCTAssertEqual(ImportKind.classify(URL(filePath: "/tmp/meeting.m4a")), .audio)
+        XCTAssertEqual(ImportKind.classify(URL(filePath: "/tmp/meeting.mp3")), .audio)
+        XCTAssertEqual(ImportKind.classify(URL(filePath: "/tmp/meeting")), .audio)
+    }
 }

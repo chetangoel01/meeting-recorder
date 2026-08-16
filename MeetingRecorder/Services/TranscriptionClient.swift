@@ -182,7 +182,11 @@ struct TranscriptionClient: Sendable {
     private func splitIntoChunks(_ url: URL, chunkDuration: TimeInterval) async throws -> [AudioChunk] {
         let asset = AVURLAsset(url: url)
         let duration = try await asset.load(.duration).seconds
-        guard duration > chunkDuration else { return [AudioChunk(offset: 0, url: url)] }
+        // Imported files can be mp3/wav/etc.; every uploaded chunk is m4a, so
+        // short non-m4a sources fall through to the export loop (one pass).
+        guard duration > chunkDuration || url.pathExtension.lowercased() != "m4a" else {
+            return [AudioChunk(offset: 0, url: url)]
+        }
 
         var chunks: [AudioChunk] = []
         var offset: TimeInterval = 0
