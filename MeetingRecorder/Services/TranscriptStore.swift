@@ -12,6 +12,7 @@ struct MeetingNote: Sendable {
     var analysisMarkdown: String?
     var transcriptMarkdown: String
     var transcriptFilename: String?
+    var attendees: [String] = []
 
     // The note file carries frontmatter, the title, and the analysis; the
     // transcript lives in a sibling file referenced by `transcript:` so notes
@@ -26,6 +27,12 @@ struct MeetingNote: Sendable {
         ]
         if let cost {
             frontmatter.append(String(format: "openrouter_cost_usd: %.4f", cost))
+        }
+        if !attendees.isEmpty {
+            let joined = attendees
+                .map { $0.replacingOccurrences(of: "\"", with: "'") }
+                .joined(separator: ", ")
+            frontmatter.append("attendees: \"\(joined)\"")
         }
         if let audioFilename {
             frontmatter.append("audio: \"\(audioFilename)\"")
@@ -85,7 +92,9 @@ struct MeetingNote: Sendable {
             audioFilename: fields["audio"],
             analysisMarkdown: analysis,
             transcriptMarkdown: inlineTranscript,
-            transcriptFilename: fields["transcript"]
+            transcriptFilename: fields["transcript"],
+            attendees: fields["attendees"]
+                .map { $0.components(separatedBy: ", ").filter { !$0.isEmpty } } ?? []
         )
     }
 
@@ -213,6 +222,48 @@ struct TranscriptStore: Sendable {
         return destination
     }
 
+    func renameFolder(_ name: String, to newName: String) throws -> String {
+        let cleaned = Self.safeFolderName(newName)
+        guard !cleaned.isEmpty else { throw CocoaError(.fileWriteInvalidFileName) }
+        let source = transcriptsURL.appending(path: name, directoryHint: .isDirectory)
+        let destination = transcriptsURL.appending(path: cleaned, directoryHint: .isDirectory)
+        guard cleaned != name else { return cleaned }
+        // Case-only renames ("work" → "Work") are the same directory on APFS;
+        // the exists check would wrongly refuse them, and moveItem handles them.
+        let caseOnlyRename = cleaned.compare(name, options: .caseInsensitive) == .orderedSame
+        guard caseOnlyRename || !FileManager.default.fileExists(atPath: destination.path) else {
+            throw CocoaError(.fileWriteFileExists)
+        }
+        try FileManager.default.moveItem(at: source, to: destination)
+        return cleaned
+    }
+
+    // Deleting a folder never deletes meetings: contents move up to Unfiled
+    // first, and the directory is only removed once it is empty.
+    func deleteFolder(_ name: String) throws {
+        let source = transcriptsURL.appending(path: name, directoryHint: .isDirectory)
+        let contents = (try? FileManager.default.contentsOfDirectory(
+            at: source,
+            includingPropertiesForKeys: nil,
+            options: [.skipsHiddenFiles]
+        )) ?? []
+        for item in contents {
+            var destination = transcriptsURL.appending(path: item.lastPathComponent)
+            if FileManager.default.fileExists(atPath: destination.path) {
+                // Insert the folder name before the (possibly compound)
+                // extension so note/.transcript.md sibling pairs stay paired.
+                let filename = item.lastPathComponent
+                let suffix = filename.lowercased().hasSuffix(Self.transcriptSuffix)
+                    ? Self.transcriptSuffix
+                    : (item.pathExtension.isEmpty ? "" : ".\(item.pathExtension)")
+                let base = String(filename.dropLast(suffix.count))
+                destination = transcriptsURL.appending(path: "\(base)-\(Self.safeFolderName(name))\(suffix)")
+            }
+            try FileManager.default.moveItem(at: item, to: destination)
+        }
+        try FileManager.default.removeItem(at: source)
+    }
+
     func trash(_ record: TranscriptRecord) throws {
         let sibling = Self.existingTranscriptURL(forNoteAt: record.markdownURL)
         try FileManager.default.trashItem(at: record.markdownURL, resultingItemURL: nil)
@@ -268,6 +319,28 @@ struct TranscriptStore: Sendable {
         }
         try updatedNote.renderedNote().write(to: record.markdownURL, atomically: true, encoding: .utf8)
         return self.record(for: updatedNote, at: record.markdownURL, folder: record.folder)
+    }
+
+    // Re-reads the note from disk (with its transcript sibling) so callers can
+    // modify one field and rewrite without guessing at unrendered state.
+    func note(for record: TranscriptRecord) -> MeetingNote? {
+        guard let text = try? String(contentsOf: record.markdownURL, encoding: .utf8) else { return nil }
+        var note = MeetingNote.parse(text, fileURL: record.markdownURL, fallbackDate: record.startedAt)
+        if let transcriptFilename = note.transcriptFilename {
+            let siblingURL = record.markdownURL.deletingLastPathComponent().appending(path: transcriptFilename)
+            if let transcript = try? String(contentsOf: siblingURL, encoding: .utf8) {
+                note.transcriptMarkdown = transcript.trimmingCharacters(in: .whitespacesAndNewlines)
+            }
+        }
+        return note
+    }
+
+    // Retitles the note in place. The filename keeps its original slug so the
+    // audio link, transcript sibling, and any Obsidian copies stay valid.
+    func rename(_ record: TranscriptRecord, to title: String) throws -> TranscriptRecord {
+        guard var note = note(for: record) else { throw CocoaError(.fileReadCorruptFile) }
+        note.title = title
+        return try update(record, with: note)
     }
 
     func exportCopy(of record: TranscriptRecord, to directory: URL) throws {
@@ -338,6 +411,7 @@ struct TranscriptStore: Sendable {
             text: note.transcriptMarkdown,
             analysis: note.analysisMarkdown,
             cost: note.cost,
+            attendees: note.attendees,
             markdownURL: url,
             audioURL: note.audioFilename.map { recordingsURL.appending(path: $0) },
             folder: folder

@@ -160,4 +160,79 @@ final class TranscriptStoreTests: XCTestCase {
         )
         XCTAssertTrue(FileManager.default.fileExists(atPath: exportedTranscript.path))
     }
+
+    func testRenameChangesTitleButKeepsFilenameAndSibling() throws {
+        let saved = try store.save(makeNote(analysis: "## Summary\n\nNotes."), folder: nil)
+        let originalURL = saved.markdownURL
+
+        let renamed = try store.rename(saved, to: "Q3 Planning")
+
+        XCTAssertEqual(renamed.title, "Q3 Planning")
+        XCTAssertEqual(renamed.markdownURL, originalURL, "Renaming must not move the file")
+        let noteText = try String(contentsOf: originalURL, encoding: .utf8)
+        XCTAssertTrue(noteText.contains("title: \"Q3 Planning\""))
+        XCTAssertTrue(noteText.contains("# Q3 Planning"))
+        XCTAssertEqual(store.loadTranscripts().first?.text, saved.text, "The transcript must survive a rename")
+    }
+
+    func testRenameFolderMovesNotesWithIt() throws {
+        _ = try store.createFolder("Work")
+        _ = try store.save(makeNote(analysis: "## Summary\n\nNotes."), folder: "Work")
+
+        let renamed = try store.renameFolder("Work", to: "Clients")
+
+        XCTAssertEqual(renamed, "Clients")
+        XCTAssertEqual(store.folders(), ["Clients"])
+        let loaded = store.loadTranscripts()
+        XCTAssertEqual(loaded.count, 1)
+        XCTAssertEqual(loaded.first?.folder, "Clients")
+    }
+
+    func testRenameFolderRefusesExistingName() throws {
+        _ = try store.createFolder("Work")
+        _ = try store.createFolder("Clients")
+        XCTAssertThrowsError(try store.renameFolder("Work", to: "Clients"))
+    }
+
+    func testRenameFolderAllowsCaseOnlyRename() throws {
+        _ = try store.createFolder("work")
+        XCTAssertEqual(try store.renameFolder("work", to: "Work"), "Work")
+        XCTAssertEqual(store.folders(), ["Work"])
+    }
+
+    func testDeleteFolderMovesContentsToUnfiled() throws {
+        _ = try store.createFolder("Work")
+        _ = try store.save(makeNote(analysis: "## Summary\n\nNotes."), folder: "Work")
+
+        try store.deleteFolder("Work")
+
+        XCTAssertTrue(store.folders().isEmpty)
+        let loaded = store.loadTranscripts()
+        XCTAssertEqual(loaded.count, 1, "Deleting a folder must never delete meetings")
+        XCTAssertNil(loaded.first?.folder)
+        XCTAssertEqual(loaded.first?.text, "**Me** [0:00]\nWe agreed to ship the smaller version.")
+    }
+
+    func testAttendeesRoundTripThroughFrontmatter() throws {
+        var note = makeNote(analysis: "## Summary\n\nNotes.")
+        note.attendees = ["Sam Doe", "riya@example.com"]
+
+        let saved = try store.save(note, folder: nil)
+        XCTAssertEqual(saved.attendees, ["Sam Doe", "riya@example.com"])
+        XCTAssertEqual(store.loadTranscripts().first?.attendees, ["Sam Doe", "riya@example.com"])
+    }
+
+    func testAnalysisPlaceholderDetection() {
+        XCTAssertEqual(
+            AnalysisPlaceholder.message(in: AnalysisPlaceholder.unavailable("The server said no.")),
+            "Analysis unavailable: The server said no."
+        )
+        XCTAssertNotNil(AnalysisPlaceholder.message(in: AnalysisPlaceholder.skipped))
+        XCTAssertNil(AnalysisPlaceholder.message(in: "## Summary\n\nA real analysis paragraph."))
+        XCTAssertNil(AnalysisPlaceholder.message(in: nil))
+        XCTAssertNil(
+            AnalysisPlaceholder.message(in: "## Summary\n\n_Analysis unavailable: x_\n\n## Decisions\n\n- Kept going"),
+            "Placeholders followed by real content are not placeholders"
+        )
+    }
 }

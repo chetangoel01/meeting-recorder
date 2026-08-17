@@ -15,6 +15,12 @@ struct TranscriptHistoryView: View {
     @State private var newFolderPrompted = false
     @State private var newFolderName = ""
     @State private var recordAwaitingFolder: TranscriptRecord?
+    @State private var recordToRename: TranscriptRecord?
+    @State private var renameTitle = ""
+    @State private var folderToRename: String?
+    @State private var folderRenameText = ""
+    @State private var folderToDelete: String?
+    @FocusState private var searchFocused: Bool
 
     var body: some View {
         NavigationSplitView {
@@ -36,6 +42,11 @@ struct TranscriptHistoryView: View {
             model.reloadTranscripts()
             selectedRecordID = selectedRecordID ?? filteredRecords.first?.id
         }
+        .dropDestination(for: URL.self) { urls, _ in
+            guard model.phase.isIdle, let url = urls.first else { return false }
+            model.importMeeting(from: url)
+            return true
+        }
         .alert("New folder", isPresented: $newFolderPrompted) {
             TextField("Folder name", text: $newFolderName)
             Button("Create") {
@@ -56,6 +67,12 @@ struct TranscriptHistoryView: View {
                 ? "Folders appear in the sidebar and as subfolders on disk."
                 : "The meeting will move into the new folder.")
         }
+        .alert(model.libraryAlert ?? "", isPresented: Binding(
+            get: { model.libraryAlert != nil },
+            set: { if !$0 { model.libraryAlert = nil } }
+        )) {
+            Button("OK", role: .cancel) {}
+        }
     }
 
     private var sidebar: some View {
@@ -74,6 +91,15 @@ struct TranscriptHistoryView: View {
                         Label(folder, systemImage: "folder")
                             .badge(model.transcripts.filter { $0.folder == folder }.count)
                             .tag(LibrarySelection.folder(folder))
+                            .contextMenu {
+                                Button("Rename Folder…") {
+                                    folderRenameText = folder
+                                    folderToRename = folder
+                                }
+                                Button("Delete Folder…", role: .destructive) {
+                                    folderToDelete = folder
+                                }
+                            }
                     }
                 }
             }
@@ -87,24 +113,63 @@ struct TranscriptHistoryView: View {
             }
             .help("New folder")
         }
+        .alert("Rename folder", isPresented: Binding(
+            get: { folderToRename != nil },
+            set: { if !$0 { folderToRename = nil } }
+        )) {
+            TextField("Folder name", text: $folderRenameText)
+            Button("Rename") {
+                if let folder = folderToRename,
+                   let renamed = model.renameFolder(folder, to: folderRenameText),
+                   selection == .folder(folder) {
+                    selection = .folder(renamed)
+                }
+                folderToRename = nil
+            }
+            Button("Cancel", role: .cancel) { folderToRename = nil }
+        }
+        .alert("Delete “\(folderToDelete ?? "")”?", isPresented: Binding(
+            get: { folderToDelete != nil },
+            set: { if !$0 { folderToDelete = nil } }
+        )) {
+            Button("Delete Folder", role: .destructive) {
+                if let folder = folderToDelete {
+                    model.deleteFolder(folder)
+                    if selection == .folder(folder) { selection = .unfiled }
+                }
+                folderToDelete = nil
+            }
+            Button("Cancel", role: .cancel) { folderToDelete = nil }
+        } message: {
+            Text("The meetings inside move to Unfiled. No meetings are deleted.")
+        }
     }
 
     private var recordList: some View {
-        List(filteredRecords, selection: $selectedRecordID) { record in
-            MeetingRow(record: record, showsFolder: selection == .all)
-                .tag(record.id)
-                .contextMenu { moveMenu(for: record) }
+        List(selection: $selectedRecordID) {
+            if let status = model.processingStatus {
+                ProcessingRow(status: status)
+                    .selectionDisabled()
+            }
+            ForEach(filteredRecords) { record in
+                MeetingRow(record: record, showsFolder: selection == .all)
+                    .tag(record.id)
+                    .contextMenu { contextMenu(for: record) }
+            }
         }
         .listStyle(.inset)
         .navigationSplitViewColumnWidth(min: 240, ideal: 280)
         .searchable(text: $searchText, placement: .sidebar, prompt: "Search meetings")
+        .searchFocused($searchFocused)
+        .onChange(of: model.searchFocusToken) { searchFocused = true }
+        .onDeleteCommand(perform: deleteSelectedRecord)
         .toolbar {
             Button("Import meeting", systemImage: "square.and.arrow.down", action: model.presentImportPanel)
                 .disabled(!model.phase.isIdle)
-                .help("Import an audio recording or a transcript file")
+                .help("Import an audio recording or a transcript file — or drop one on this window")
         }
         .overlay {
-            if filteredRecords.isEmpty {
+            if filteredRecords.isEmpty, model.processingStatus == nil {
                 ContentUnavailableView(
                     searchText.isEmpty ? "No meetings here" : "No matches",
                     systemImage: searchText.isEmpty ? "waveform" : "magnifyingglass",
@@ -116,10 +181,27 @@ struct TranscriptHistoryView: View {
                 )
             }
         }
+        .alert("Rename meeting", isPresented: Binding(
+            get: { recordToRename != nil },
+            set: { if !$0 { recordToRename = nil } }
+        )) {
+            TextField("Title", text: $renameTitle)
+            Button("Rename") {
+                if let record = recordToRename {
+                    model.renameTranscript(record, to: renameTitle)
+                }
+                recordToRename = nil
+            }
+            Button("Cancel", role: .cancel) { recordToRename = nil }
+        }
     }
 
     @ViewBuilder
-    private func moveMenu(for record: TranscriptRecord) -> some View {
+    private func contextMenu(for record: TranscriptRecord) -> some View {
+        Button("Rename…") {
+            renameTitle = record.title
+            recordToRename = record
+        }
         Menu("Move to") {
             Button("Unfiled") { model.moveTranscript(record, toFolder: nil) }
                 .disabled(record.folder == nil)
@@ -133,6 +215,9 @@ struct TranscriptHistoryView: View {
                 newFolderPrompted = true
             }
         }
+        Divider()
+        Button("Regenerate Notes") { model.regenerateNotes(for: record) }
+            .disabled(model.regeneratingNoteIDs.contains(record.id))
         Button("Copy transcript") { model.copyTranscript(record) }
         Button("Show in Finder") {
             NSWorkspace.shared.activateFileViewerSelecting([record.markdownURL])
@@ -142,6 +227,23 @@ struct TranscriptHistoryView: View {
             if selectedRecordID == record.id { selectedRecordID = nil }
             model.deleteTranscript(record)
         }
+    }
+
+    // Delete key / ⌘⌫ on the focused list: trash the selection and keep the
+    // user in the list by selecting the nearest neighbor.
+    private func deleteSelectedRecord() {
+        guard let record = selectedRecord else { return }
+        let records = filteredRecords
+        if let index = records.firstIndex(where: { $0.id == record.id }) {
+            if index + 1 < records.count {
+                selectedRecordID = records[index + 1].id
+            } else if index > 0 {
+                selectedRecordID = records[index - 1].id
+            } else {
+                selectedRecordID = nil
+            }
+        }
+        model.deleteTranscript(record)
     }
 
     private var filteredRecords: [TranscriptRecord] {
@@ -165,6 +267,34 @@ struct TranscriptHistoryView: View {
 
     private var selectedRecord: TranscriptRecord? {
         model.transcripts.first { $0.id == selectedRecordID }
+    }
+}
+
+// The in-flight meeting, pinned above finished ones so recordings and imports
+// visibly land in the library instead of appearing out of nowhere.
+private struct ProcessingRow: View {
+    let status: ProcessingStatus
+
+    var body: some View {
+        HStack(spacing: 10) {
+            if let progress = status.progress {
+                ProgressView(value: progress)
+                    .progressViewStyle(.circular)
+                    .controlSize(.small)
+            } else {
+                ProgressView()
+                    .controlSize(.small)
+            }
+            VStack(alignment: .leading, spacing: 2) {
+                Text(status.title)
+                    .font(.body.weight(.medium))
+                    .lineLimit(1)
+                Text(status.detail)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .padding(.vertical, 4)
     }
 }
 
@@ -216,14 +346,11 @@ private struct MeetingRow: View {
 }
 
 private struct NoteDetailView: View {
-    private enum Tab: String {
-        case notes = "Notes"
-        case transcript = "Transcript"
-    }
-
     @ObservedObject var model: AppModel
     let record: TranscriptRecord
-    @State private var tab: Tab = .notes
+    @State private var infoPresented = false
+    @State private var renamePrompted = false
+    @State private var renameTitle = ""
 
     var body: some View {
         ScrollView {
@@ -238,8 +365,31 @@ private struct NoteDetailView: View {
                 }
                 .padding(.bottom, 20)
 
-                if visibleTab == .notes, let analysis = record.analysis {
-                    MarkdownSectionsView(markdown: analysis)
+                if visibleTab == .notes {
+                    if model.regeneratingNoteIDs.contains(record.id) {
+                        StatusCard {
+                            HStack(spacing: 8) {
+                                ProgressView()
+                                    .controlSize(.small)
+                                Text("Writing notes…")
+                                    .foregroundStyle(.secondary)
+                            }
+                        }
+                    } else if let failure = record.analysisFailureMessage {
+                        StatusCard {
+                            VStack(alignment: .leading, spacing: 10) {
+                                Text("No meeting notes")
+                                    .font(.headline)
+                                Text(failure)
+                                    .foregroundStyle(.secondary)
+                                Button("Regenerate Notes") {
+                                    model.regenerateNotes(for: record)
+                                }
+                            }
+                        }
+                    } else if let analysis = record.analysis {
+                        MarkdownSectionsView(markdown: analysis)
+                    }
                 } else {
                     TranscriptView(text: record.text)
                 }
@@ -254,9 +404,12 @@ private struct NoteDetailView: View {
         .toolbar {
             ToolbarItem(placement: .principal) {
                 if record.analysis != nil {
-                    Picker("Section", selection: Binding(get: { visibleTab }, set: { tab = $0 })) {
-                        Text(Tab.notes.rawValue).tag(Tab.notes)
-                        Text(Tab.transcript.rawValue).tag(Tab.transcript)
+                    Picker("Section", selection: Binding(
+                        get: { visibleTab },
+                        set: { model.noteTab = $0 }
+                    )) {
+                        Text(NoteTab.notes.rawValue).tag(NoteTab.notes)
+                        Text(NoteTab.transcript.rawValue).tag(NoteTab.transcript)
                     }
                     .pickerStyle(.segmented)
                     .labelsHidden()
@@ -273,18 +426,45 @@ private struct NoteDetailView: View {
                     }
                 }
                 .help(visibleTab == .notes ? "Copy meeting notes" : "Copy transcript")
-                Button("Show in Finder", systemImage: "folder") {
-                    NSWorkspace.shared.activateFileViewerSelecting([record.markdownURL])
+
+                Button("Info", systemImage: "info.circle") {
+                    infoPresented.toggle()
                 }
-                .help("Show the note file in Finder")
+                .help("Meeting details")
+                .popover(isPresented: $infoPresented, arrowEdge: .bottom) {
+                    MeetingInfoView(record: record)
+                }
+
+                Menu {
+                    Button("Regenerate Notes", systemImage: "arrow.clockwise") {
+                        model.regenerateNotes(for: record)
+                    }
+                    .disabled(model.regeneratingNoteIDs.contains(record.id))
+                    Button("Rename…", systemImage: "pencil") {
+                        renameTitle = record.title
+                        renamePrompted = true
+                    }
+                    Divider()
+                    Button("Show in Finder", systemImage: "folder") {
+                        NSWorkspace.shared.activateFileViewerSelecting([record.markdownURL])
+                    }
+                } label: {
+                    Label("More", systemImage: "ellipsis.circle")
+                }
+                .help("More actions")
             }
+        }
+        .alert("Rename meeting", isPresented: $renamePrompted) {
+            TextField("Title", text: $renameTitle)
+            Button("Rename") { model.renameTranscript(record, to: renameTitle) }
+            Button("Cancel", role: .cancel) {}
         }
     }
 
     // Notes-less records (legacy imports, analysis disabled) read as
     // transcript-only regardless of the picker's stored state.
-    private var visibleTab: Tab {
-        record.analysis == nil ? .transcript : tab
+    private var visibleTab: NoteTab {
+        record.analysis == nil ? .transcript : model.noteTab
     }
 
     private var subtitle: String {
@@ -297,6 +477,72 @@ private struct NoteDetailView: View {
             parts.append(folder)
         }
         return parts.joined(separator: "  ·  ")
+    }
+}
+
+// A quiet in-document card for non-content states (regenerating, failed
+// analysis) so errors live where the notes would be, with the fix in reach.
+private struct StatusCard<Content: View>: View {
+    @ViewBuilder let content: Content
+
+    var body: some View {
+        content
+            .padding(16)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(
+                RoundedRectangle(cornerRadius: 8)
+                    .fill(.quaternary.opacity(0.5))
+            )
+    }
+}
+
+// Metadata that informs but isn't read every visit: kept out of the header,
+// one ⓘ away.
+private struct MeetingInfoView: View {
+    let record: TranscriptRecord
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            infoRow("Recorded", record.startedAt.formatted(date: .abbreviated, time: .shortened))
+            if record.duration > 0 {
+                infoRow("Duration", "\(max(1, Int(record.duration / 60))) min")
+            }
+            infoRow("Source", record.sourceApplication)
+            infoRow("Folder", record.folder ?? "Unfiled")
+            if !record.attendees.isEmpty {
+                infoRow("Attendees", record.attendees.joined(separator: "\n"))
+            }
+            if let cost = record.cost {
+                infoRow("Cost", String(format: "$%.4f", cost))
+            }
+            Divider()
+            HStack(spacing: 8) {
+                Button("Show in Finder") {
+                    NSWorkspace.shared.activateFileViewerSelecting([record.markdownURL])
+                }
+                if let audioURL = record.audioURL,
+                   FileManager.default.fileExists(atPath: audioURL.path) {
+                    Button("Show Audio") {
+                        NSWorkspace.shared.activateFileViewerSelecting([audioURL])
+                    }
+                }
+            }
+            .controlSize(.small)
+        }
+        .padding(14)
+        .frame(width: 300, alignment: .leading)
+    }
+
+    private func infoRow(_ label: String, _ value: String) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 10) {
+            Text(label)
+                .foregroundStyle(.secondary)
+                .frame(width: 76, alignment: .leading)
+            Text(value)
+                .textSelection(.enabled)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .font(.callout)
     }
 }
 

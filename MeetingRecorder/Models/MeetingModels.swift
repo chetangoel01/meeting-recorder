@@ -47,9 +47,42 @@ struct TranscriptRecord: Codable, Identifiable, Equatable, Sendable {
     let text: String
     let analysis: String?
     let cost: Double?
+    let attendees: [String]
     let markdownURL: URL
     let audioURL: URL?
     let folder: String?
+}
+
+// The pipeline writes these placeholders into the analysis slot when notes
+// could not be produced, so the state survives restarts inside the file
+// itself. The library detects them and offers regeneration instead of
+// rendering them as notes.
+enum AnalysisPlaceholder {
+    static func unavailable(_ message: String) -> String {
+        "## Summary\n\n_Analysis unavailable: \(message)_"
+    }
+
+    static let skipped =
+        "## Summary\n\n_Analysis skipped: no OpenRouter API key. Add one in Settings, then choose Regenerate Notes._"
+
+    static func message(in analysis: String?) -> String? {
+        guard let analysis else { return nil }
+        var content = analysis.trimmingCharacters(in: .whitespacesAndNewlines)
+        if content.hasPrefix("## Summary") {
+            content = String(content.dropFirst("## Summary".count))
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        guard content.hasPrefix("_Analysis "), content.hasSuffix("_"), !content.contains("\n") else {
+            return nil
+        }
+        return String(content.dropFirst().dropLast())
+    }
+}
+
+extension TranscriptRecord {
+    var analysisFailureMessage: String? {
+        AnalysisPlaceholder.message(in: analysis)
+    }
 }
 
 enum RecorderPhase: Equatable, Sendable {

@@ -5,6 +5,11 @@ struct MenuBarContent: View {
     @Environment(\.openWindow) private var openWindow
 
     var body: some View {
+        if let status = model.processingStatus {
+            Text("\(status.title): \(status.detail)")
+            Divider()
+        }
+
         if model.phase.isRecording {
             Button("Stop recording", systemImage: "stop.circle.fill", action: model.stopRecording)
         } else {

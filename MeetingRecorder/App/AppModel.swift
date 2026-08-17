@@ -6,6 +6,17 @@ import Foundation
 import ServiceManagement
 import UniformTypeIdentifiers
 
+enum NoteTab: String {
+    case notes = "Notes"
+    case transcript = "Transcript"
+}
+
+struct ProcessingStatus: Equatable {
+    let title: String
+    let detail: String
+    let progress: Double?
+}
+
 @MainActor
 final class AppModel: ObservableObject {
     static let shared = AppModel()
@@ -38,6 +49,30 @@ final class AppModel: ObservableObject {
     @Published private(set) var systemAudioIncluded = true
     @Published private(set) var notchCollapsed = false
     @Published var settingsPresented = false
+    @Published private(set) var regeneratingNoteIDs: Set<UUID> = []
+    @Published var libraryAlert: String?
+    @Published var noteTab: NoteTab = .notes
+    @Published private(set) var searchFocusToken = 0
+
+    // What the library's progress row and the menu bar show while the
+    // pipeline is running. Nil whenever there is nothing in flight.
+    var processingStatus: ProcessingStatus? {
+        let title = currentSession?.candidate.appName ?? "Meeting"
+        switch phase {
+        case .saving:
+            return ProcessingStatus(title: title, detail: "Saving audio…", progress: nil)
+        case let .transcribing(progress):
+            return ProcessingStatus(
+                title: title,
+                detail: "Transcribing — \(Int(progress * 100))%",
+                progress: progress
+            )
+        case .analyzing:
+            return ProcessingStatus(title: title, detail: "Writing notes…", progress: nil)
+        default:
+            return nil
+        }
+    }
 
     let settings: AppSettings
 
@@ -445,6 +480,96 @@ final class AppModel: ObservableObject {
         reloadTranscripts()
     }
 
+    func renameTranscript(_ record: TranscriptRecord, to title: String) {
+        let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, trimmed != record.title else { return }
+        do {
+            _ = try store.rename(record, to: trimmed)
+            reloadTranscripts()
+        } catch {
+            libraryAlert = "The meeting couldn't be renamed: \(error.localizedDescription)"
+        }
+    }
+
+    @discardableResult
+    func renameFolder(_ name: String, to newName: String) -> String? {
+        do {
+            let renamed = try store.renameFolder(name, to: newName)
+            reloadTranscripts()
+            return renamed
+        } catch let error as CocoaError where error.code == .fileWriteFileExists {
+            libraryAlert = "A folder named “\(newName)” already exists."
+            return nil
+        } catch {
+            libraryAlert = "The folder couldn't be renamed: \(error.localizedDescription)"
+            return nil
+        }
+    }
+
+    func deleteFolder(_ name: String) {
+        do {
+            try store.deleteFolder(name)
+            reloadTranscripts()
+        } catch {
+            libraryAlert = "The folder couldn't be removed: \(error.localizedDescription)"
+            reloadTranscripts()
+        }
+    }
+
+    // Re-runs the LLM over an existing meeting with the current prompt and
+    // model. The title and folder are deliberately left alone — the user may
+    // have renamed or refiled the meeting, and regeneration must not undo that.
+    func regenerateNotes(for record: TranscriptRecord) {
+        guard !regeneratingNoteIDs.contains(record.id) else { return }
+        guard let apiKey = KeychainStore.loadAPIKey(), !apiKey.isEmpty else {
+            libraryAlert = "Add your OpenRouter API key in Settings to write meeting notes."
+            return
+        }
+        guard var note = store.note(for: record),
+              !note.transcriptMarkdown.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        else {
+            libraryAlert = "This meeting has no transcript to analyze."
+            return
+        }
+        regeneratingNoteIDs.insert(record.id)
+
+        Task {
+            do {
+                let context = AnalysisContext(
+                    fallbackTitle: record.title,
+                    sourceApplication: record.sourceApplication,
+                    startedAt: record.startedAt,
+                    duration: record.duration,
+                    calendarEvent: nil,
+                    existingFolders: store.folders()
+                )
+                let (outcome, analysisCost) = try await analysisClient.analyze(
+                    transcript: note.transcriptMarkdown,
+                    context: context,
+                    apiKey: apiKey,
+                    model: settings.analysisModel,
+                    instructions: settings.analysisPrompt
+                )
+                note.analysisMarkdown = outcome.analysisMarkdown
+                if note.cost != nil || analysisCost != nil {
+                    note.cost = (note.cost ?? 0) + (analysisCost ?? 0)
+                }
+                let updated = try store.update(record, with: note)
+                reloadTranscripts()
+                if settings.obsidianExportEnabled, !settings.obsidianExportPath.isEmpty {
+                    try? store.exportCopy(of: updated, to: URL(filePath: settings.obsidianExportPath))
+                }
+            } catch {
+                libraryAlert = "Notes couldn't be regenerated: \(error.localizedDescription)"
+            }
+            regeneratingNoteIDs.remove(record.id)
+        }
+    }
+
+    func requestSearchFocus() {
+        searchFocusToken += 1
+    }
+
     private func startRecording(_ candidate: MeetingCandidate) {
         microphoneIncluded = true
         systemAudioIncluded = true
@@ -522,6 +647,7 @@ final class AppModel: ObservableObject {
     // never lose it.
     private func finalize(note: MeetingNote, calendarEvent: MatchedCalendarEvent?, apiKey: String?) async throws {
         var note = note
+        note.attendees = calendarEvent?.attendees ?? []
         var record = try store.save(note, folder: nil)
         note.transcriptFilename = record.markdownURL
             .deletingPathExtension().lastPathComponent + TranscriptStore.transcriptSuffix
@@ -556,11 +682,11 @@ final class AppModel: ObservableObject {
                     _ = try? store.move(record, toFolder: folder)
                 }
             } catch {
-                note.analysisMarkdown = "## Summary\n\n_Analysis unavailable: \(error.localizedDescription)_"
+                note.analysisMarkdown = AnalysisPlaceholder.unavailable(error.localizedDescription)
                 record = (try? store.update(record, with: note)) ?? record
             }
         } else if settings.analysisEnabled {
-            note.analysisMarkdown = "## Summary\n\n_Analysis skipped: no OpenRouter API key. Add one in Settings and re-import._"
+            note.analysisMarkdown = AnalysisPlaceholder.skipped
             record = (try? store.update(record, with: note)) ?? record
         }
 
