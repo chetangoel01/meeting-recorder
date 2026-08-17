@@ -107,11 +107,27 @@ struct TranscriptHistoryView: View {
         .navigationTitle("Meetings")
         .navigationSplitViewColumnWidth(min: 170, ideal: 190)
         .toolbar {
-            Button("New folder", systemImage: "folder.badge.plus") {
-                recordAwaitingFolder = nil
-                newFolderPrompted = true
+            SettingsLink {
+                Label("Settings", systemImage: "gearshape")
             }
-            .help("New folder")
+            .help("Settings")
+        }
+        // Notes-style footer: folder creation lives with the folder list, and
+        // the narrow sidebar toolbar keeps room for Settings.
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            HStack {
+                Button {
+                    recordAwaitingFolder = nil
+                    newFolderPrompted = true
+                } label: {
+                    Label("New Folder", systemImage: "folder.badge.plus")
+                }
+                .buttonStyle(.borderless)
+                .help("New folder")
+                Spacer()
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 8)
         }
         .alert("Rename folder", isPresented: Binding(
             get: { folderToRename != nil },
