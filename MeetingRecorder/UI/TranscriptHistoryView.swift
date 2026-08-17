@@ -106,28 +106,33 @@ struct TranscriptHistoryView: View {
         }
         .navigationTitle("Meetings")
         .navigationSplitViewColumnWidth(min: 170, ideal: 190)
-        .toolbar {
-            SettingsLink {
-                Label("Settings", systemImage: "gearshape")
-            }
-            .help("Settings")
-        }
-        // Notes-style footer: folder creation lives with the folder list, and
-        // the narrow sidebar toolbar keeps room for Settings.
+        // Notes-style footer: app-level actions live at the bottom of the
+        // sidebar where the narrow toolbar can't crowd them — New Folder and
+        // Import on the left, Settings on the right.
         .safeAreaInset(edge: .bottom, spacing: 0) {
-            HStack {
+            HStack(spacing: 16) {
                 Button {
                     recordAwaitingFolder = nil
                     newFolderPrompted = true
                 } label: {
-                    Label("New Folder", systemImage: "folder.badge.plus")
+                    Image(systemName: "folder.badge.plus")
                 }
-                .buttonStyle(.borderless)
                 .help("New folder")
+                Button(action: model.presentImportPanel) {
+                    Image(systemName: "square.and.arrow.down")
+                }
+                .disabled(!model.phase.isIdle)
+                .help("Import an audio recording or a transcript file — or drop one on this window")
                 Spacer()
+                SettingsLink {
+                    Image(systemName: "gearshape")
+                }
+                .help("Settings")
             }
-            .padding(.horizontal, 10)
-            .padding(.vertical, 8)
+            .buttonStyle(.borderless)
+            .foregroundStyle(.secondary)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 9)
         }
         .alert("Rename folder", isPresented: Binding(
             get: { folderToRename != nil },
@@ -179,22 +184,24 @@ struct TranscriptHistoryView: View {
         .searchFocused($searchFocused)
         .onChange(of: model.searchFocusToken) { searchFocused = true }
         .onDeleteCommand(perform: deleteSelectedRecord)
-        .toolbar {
-            Button("Import meeting", systemImage: "square.and.arrow.down", action: model.presentImportPanel)
-                .disabled(!model.phase.isIdle)
-                .help("Import an audio recording or a transcript file — or drop one on this window")
-        }
         .overlay {
             if filteredRecords.isEmpty, model.processingStatus == nil {
-                ContentUnavailableView(
-                    searchText.isEmpty ? "No meetings here" : "No matches",
-                    systemImage: searchText.isEmpty ? "waveform" : "magnifyingglass",
-                    description: Text(
-                        searchText.isEmpty
-                            ? "Completed meeting notes will appear here."
-                            : "No meeting titles or transcripts contain “\(searchText)”."
+                if searchText.isEmpty {
+                    ContentUnavailableView {
+                        Label("No meetings here", systemImage: "waveform")
+                    } description: {
+                        Text("Completed meeting notes will appear here. Record from the menu bar, import a file, or drop one on this window.")
+                    } actions: {
+                        Button("Import Meeting…", action: model.presentImportPanel)
+                            .disabled(!model.phase.isIdle)
+                    }
+                } else {
+                    ContentUnavailableView(
+                        "No matches",
+                        systemImage: "magnifyingglass",
+                        description: Text("No meeting titles or transcripts contain “\(searchText)”.")
                     )
-                )
+                }
             }
         }
         .alert("Rename meeting", isPresented: Binding(
@@ -235,6 +242,9 @@ struct TranscriptHistoryView: View {
         Button("Regenerate Notes") { model.regenerateNotes(for: record) }
             .disabled(model.regeneratingNoteIDs.contains(record.id))
         Button("Copy transcript") { model.copyTranscript(record) }
+        if model.obsidianVaultURL != nil {
+            Button("Open in Obsidian") { model.openInObsidian(record) }
+        }
         Button("Show in Finder") {
             NSWorkspace.shared.activateFileViewerSelecting([record.markdownURL])
         }
@@ -461,12 +471,18 @@ private struct NoteDetailView: View {
                         renamePrompted = true
                     }
                     Divider()
+                    if model.obsidianVaultURL != nil {
+                        Button("Open in Obsidian", systemImage: "arrow.up.forward.app") {
+                            model.openInObsidian(record)
+                        }
+                    }
                     Button("Show in Finder", systemImage: "folder") {
                         NSWorkspace.shared.activateFileViewerSelecting([record.markdownURL])
                     }
                 } label: {
                     Label("More", systemImage: "ellipsis.circle")
                 }
+                .menuIndicator(.hidden)
                 .help("More actions")
             }
         }

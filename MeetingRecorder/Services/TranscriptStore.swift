@@ -343,24 +343,6 @@ struct TranscriptStore: Sendable {
         return try update(record, with: note)
     }
 
-    func exportCopy(of record: TranscriptRecord, to directory: URL) throws {
-        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        let contents = try String(contentsOf: record.markdownURL, encoding: .utf8)
-        try contents.write(
-            to: directory.appending(path: record.markdownURL.lastPathComponent),
-            atomically: true,
-            encoding: .utf8
-        )
-        if let sibling = Self.existingTranscriptURL(forNoteAt: record.markdownURL) {
-            let transcriptContents = try String(contentsOf: sibling, encoding: .utf8)
-            try transcriptContents.write(
-                to: directory.appending(path: sibling.lastPathComponent),
-                atomically: true,
-                encoding: .utf8
-            )
-        }
-    }
-
     func loadTranscripts() -> [TranscriptRecord] {
         var results: [TranscriptRecord] = []
         results.append(contentsOf: loadNotes(in: transcriptsURL, folder: nil))

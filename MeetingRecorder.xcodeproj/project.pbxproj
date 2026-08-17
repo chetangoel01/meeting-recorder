@@ -13,6 +13,7 @@
 		2C073508EB36E09B254389B1 /* NotchPanelController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8BB75312287F43413D88913B /* NotchPanelController.swift */; };
 		2F45C2C27A020C070A044F8B /* AppModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = FCBDCEDA7069B63DED0D86D6 /* AppModel.swift */; };
 		2FD4404046B750C4DF9D6E4E /* MeetingAppClassifierTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA7DECDEB33B16CB1D985BA5 /* MeetingAppClassifierTests.swift */; };
+		38C94F3EB21EFAC9F8A45710 /* ObsidianVaultLink.swift in Sources */ = {isa = PBXBuildFile; fileRef = 39857555E116A9AF3DBD5409 /* ObsidianVaultLink.swift */; };
 		39099537821C07CA9180B281 /* CalendarMeetingMonitor.swift in Sources */ = {isa = PBXBuildFile; fileRef = F3493FF682761B9751B8C7BC /* CalendarMeetingMonitor.swift */; };
 		3B47BF13FC04EBE4BC55173E /* MeetingActivityRuleTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A3633EE8FBDE4807AF0BADCB /* MeetingActivityRuleTests.swift */; };
 		43C64881592FE5D108F1B8F7 /* KeychainStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 48019B666D4766163C82543A /* KeychainStore.swift */; };
@@ -26,6 +27,7 @@
 		71B1FB54D0E1DBD706F68C7C /* TranscriptHistoryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9263DE18CD832E2E123AF731 /* TranscriptHistoryView.swift */; };
 		75F2EF869436BB03E03AE1F4 /* MeetingRecorderApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2D42CF914F5DE82DFF54A34E /* MeetingRecorderApp.swift */; };
 		9BB8EE90771DDD9F364C5E29 /* MeetingModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 52F5091C0E40675FBA5AD4CA /* MeetingModels.swift */; };
+		A28424CFBDFD3B1F4885C572 /* ObsidianVaultLinkTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = AD136994E2B31C8DEF47E408 /* ObsidianVaultLinkTests.swift */; };
 		AEA2171F7A44A99CFD070900 /* RecordingDurationValidatorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4ECC265D9BAEEC0AE3A6DE1C /* RecordingDurationValidatorTests.swift */; };
 		B00FC190767A16A8BEFDF6D6 /* TranscriptStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = DAD1B7E7029B4796484C01EE /* TranscriptStore.swift */; };
 		C0CA041BB10DB38FB623B992 /* TrackTranscriptBuilder.swift in Sources */ = {isa = PBXBuildFile; fileRef = EB324C805AD70077ABEFA189 /* TrackTranscriptBuilder.swift */; };
@@ -52,6 +54,7 @@
 		1CE0B053F636C8564079FA27 /* MeetingRecorder.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = MeetingRecorder.entitlements; sourceTree = "<group>"; };
 		2376D68BA7A20CDBDE7E584A /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		2D42CF914F5DE82DFF54A34E /* MeetingRecorderApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MeetingRecorderApp.swift; sourceTree = "<group>"; };
+		39857555E116A9AF3DBD5409 /* ObsidianVaultLink.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ObsidianVaultLink.swift; sourceTree = "<group>"; };
 		48019B666D4766163C82543A /* KeychainStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeychainStore.swift; sourceTree = "<group>"; };
 		4EAD963E3F91BB8E6E8F86C1 /* AnalysisClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AnalysisClient.swift; sourceTree = "<group>"; };
 		4ECC265D9BAEEC0AE3A6DE1C /* RecordingDurationValidatorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecordingDurationValidatorTests.swift; sourceTree = "<group>"; };
@@ -67,6 +70,7 @@
 		A70F7BE32AB1ED7A9D98D286 /* MeetingRecorderTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = MeetingRecorderTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		A809315A3A130DE4126B7F58 /* AppRelocator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppRelocator.swift; sourceTree = "<group>"; };
 		AA7DECDEB33B16CB1D985BA5 /* MeetingAppClassifierTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MeetingAppClassifierTests.swift; sourceTree = "<group>"; };
+		AD136994E2B31C8DEF47E408 /* ObsidianVaultLinkTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ObsidianVaultLinkTests.swift; sourceTree = "<group>"; };
 		B66F6DED41970E9C8EF963A6 /* CalendarMeetingMonitorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CalendarMeetingMonitorTests.swift; sourceTree = "<group>"; };
 		BBF162DE78789AC1C2835B97 /* TrackTranscriptBuilderTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TrackTranscriptBuilderTests.swift; sourceTree = "<group>"; };
 		CC5A5E7D89DE1ADF1AF506A9 /* MeetingRecorder.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = MeetingRecorder.app; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -103,6 +107,7 @@
 				AA7DECDEB33B16CB1D985BA5 /* MeetingAppClassifierTests.swift */,
 				69D0A5DD1AD26889FF6E6413 /* MeetingOfferPolicyTests.swift */,
 				77497611B7004DB08F0FEA62 /* NotchLayoutTests.swift */,
+				AD136994E2B31C8DEF47E408 /* ObsidianVaultLinkTests.swift */,
 				4ECC265D9BAEEC0AE3A6DE1C /* RecordingDurationValidatorTests.swift */,
 				BBF162DE78789AC1C2835B97 /* TrackTranscriptBuilderTests.swift */,
 				F98A15993CB2050F6B23C964 /* TranscriptStoreTests.swift */,
@@ -180,6 +185,7 @@
 				F3493FF682761B9751B8C7BC /* CalendarMeetingMonitor.swift */,
 				48019B666D4766163C82543A /* KeychainStore.swift */,
 				D65B479CCD65A43A89956B13 /* MeetingActivityMonitor.swift */,
+				39857555E116A9AF3DBD5409 /* ObsidianVaultLink.swift */,
 				F100649D759416A599A55B6E /* ScreenAudioRecorder.swift */,
 				EB324C805AD70077ABEFA189 /* TrackTranscriptBuilder.swift */,
 				EB48EA44A8FA9BAB43DDB7EA /* TranscriptionClient.swift */,
@@ -295,6 +301,7 @@
 				70746BEAD7C31BE1292D515C /* MenuBarContent.swift in Sources */,
 				2C073508EB36E09B254389B1 /* NotchPanelController.swift in Sources */,
 				E43BB5E434D1A400555575E2 /* NotchView.swift in Sources */,
+				38C94F3EB21EFAC9F8A45710 /* ObsidianVaultLink.swift in Sources */,
 				67578E1980212B1B1EAE53CD /* ScreenAudioRecorder.swift in Sources */,
 				E910B45B95ADAD36440AEAD7 /* SettingsView.swift in Sources */,
 				C0CA041BB10DB38FB623B992 /* TrackTranscriptBuilder.swift in Sources */,
@@ -314,6 +321,7 @@
 				2FD4404046B750C4DF9D6E4E /* MeetingAppClassifierTests.swift in Sources */,
 				6513B5E0CDA4D40750C6997D /* MeetingOfferPolicyTests.swift in Sources */,
 				1FC5C3B60D6541AB1F578741 /* NotchLayoutTests.swift in Sources */,
+				A28424CFBDFD3B1F4885C572 /* ObsidianVaultLinkTests.swift in Sources */,
 				AEA2171F7A44A99CFD070900 /* RecordingDurationValidatorTests.swift in Sources */,
 				666959B3378418A2C03E3176 /* TrackTranscriptBuilderTests.swift in Sources */,
 				5260889A500430835854FC26 /* TranscriptStoreTests.swift in Sources */,

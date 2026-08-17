@@ -144,23 +144,6 @@ final class TranscriptStoreTests: XCTestCase {
         )
     }
 
-    func testExportCopyIncludesTranscriptSibling() throws {
-        let saved = try store.save(makeNote(analysis: "## Summary\n\nExported."), folder: nil)
-        let exportDirectory = root.appending(path: "vault-export", directoryHint: .isDirectory)
-
-        try store.exportCopy(of: saved, to: exportDirectory)
-
-        let exportedNote = exportDirectory.appending(path: saved.markdownURL.lastPathComponent)
-        let exportedTranscript = exportDirectory.appending(
-            path: saved.markdownURL.deletingPathExtension().lastPathComponent + ".transcript.md"
-        )
-        XCTAssertEqual(
-            try String(contentsOf: exportedNote, encoding: .utf8),
-            try String(contentsOf: saved.markdownURL, encoding: .utf8)
-        )
-        XCTAssertTrue(FileManager.default.fileExists(atPath: exportedTranscript.path))
-    }
-
     func testRenameChangesTitleButKeepsFilenameAndSibling() throws {
         let saved = try store.save(makeNote(analysis: "## Summary\n\nNotes."), folder: nil)
         let originalURL = saved.markdownURL

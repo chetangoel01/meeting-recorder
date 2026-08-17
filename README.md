@@ -34,9 +34,9 @@ First launch: enter an [OpenRouter](https://openrouter.ai) API key in Settings, 
 - Ships a Meeting Library window: folder sidebar, full-text search across titles, transcripts, and analysis, a tabbed note viewer, and context-menu filing (move between folders, create folders, trash). Meetings and folders can be renamed; deleting a folder moves its meetings to Unfiled instead of deleting them. While a recording or import is transcribing, it appears as a progress row at the top of the list, and the menu bar icon and menu reflect the pipeline state.
 - Regenerates notes on demand: after editing the prompt or switching models, choose Regenerate Notes from the toolbar or a meeting's context menu to re-run analysis in place. Failed analyses render as an error card with the retry one click away — the title and folder you chose are never overwritten.
 - Shows an info popover per meeting: recorded time, duration, source app, folder, calendar attendees, total OpenRouter cost, and Finder reveals for the note and kept audio.
-- Imports existing meetings: an audio file (any common format) runs through transcription and analysis; a `.txt`/`.md` transcript skips straight to analysis. Import from the menu bar, the library toolbar, File -> Import Meeting (Cmd-O), or by dropping a file onto the library window.
+- Imports existing meetings: an audio file (any common format) runs through transcription and analysis; a `.txt`/`.md` transcript skips straight to analysis. Import from the menu bar, the button at the bottom of the library sidebar, File -> Import Meeting (Cmd-O), or by dropping a file onto the library window.
 - Keyboard-first library: Cmd-F focuses search, Cmd-1/Cmd-2 switch Notes/Transcript, and Delete moves the selected meeting to the Trash.
-- Optionally copies every finished note into an Obsidian vault folder.
+- Optionally links an Obsidian vault: a "Meetings" symlink inside the vault points at the meeting library, so Obsidian's navigation, search, and backlinks work on the real notes - one source of truth, no exported copies that drift. Linked meetings get an Open in Obsidian action; a pre-existing exported-copies folder is moved aside, never deleted. (Symlinked folders don't sync to Obsidian mobile.)
 - Retains source audio after any recording or transcription failure.
 
 ## Requirements

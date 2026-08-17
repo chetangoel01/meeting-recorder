@@ -10,8 +10,7 @@ final class AppSettings: ObservableObject {
         static let analysisEnabled = "analysisEnabled"
         static let analysisModel = "analysisModel"
         static let analysisPrompt = "analysisPrompt"
-        static let obsidianExportEnabled = "obsidianExportEnabled"
-        static let obsidianExportPath = "obsidianExportPath"
+        static let obsidianVaultPath = "obsidianVaultPath"
     }
 
     @Published var launchAtLogin: Bool {
@@ -42,16 +41,12 @@ final class AppSettings: ObservableObject {
         didSet { defaults.set(analysisPrompt, forKey: Key.analysisPrompt) }
     }
 
-    @Published var obsidianExportEnabled: Bool {
-        didSet { defaults.set(obsidianExportEnabled, forKey: Key.obsidianExportEnabled) }
+    @Published var obsidianVaultPath: String {
+        didSet { defaults.set(obsidianVaultPath, forKey: Key.obsidianVaultPath) }
     }
 
-    @Published var obsidianExportPath: String {
-        didSet { defaults.set(obsidianExportPath, forKey: Key.obsidianExportPath) }
-    }
-
-    static let defaultObsidianExportPath = NSString(
-        string: "~/Library/Mobile Documents/iCloud~md~obsidian/Documents/Vault/Meetings"
+    static let defaultObsidianVaultPath = NSString(
+        string: "~/Library/Mobile Documents/iCloud~md~obsidian/Documents/Vault"
     ).expandingTildeInPath
 
     private let defaults: UserDefaults
@@ -65,7 +60,6 @@ final class AppSettings: ObservableObject {
         analysisEnabled = defaults.object(forKey: Key.analysisEnabled) as? Bool ?? true
         analysisModel = defaults.string(forKey: Key.analysisModel) ?? "deepseek/deepseek-v4-pro"
         analysisPrompt = defaults.string(forKey: Key.analysisPrompt) ?? AnalysisClient.defaultInstructions
-        obsidianExportEnabled = defaults.object(forKey: Key.obsidianExportEnabled) as? Bool ?? false
-        obsidianExportPath = defaults.string(forKey: Key.obsidianExportPath) ?? ""
+        obsidianVaultPath = defaults.string(forKey: Key.obsidianVaultPath) ?? ""
     }
 }

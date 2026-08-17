@@ -554,11 +554,8 @@ final class AppModel: ObservableObject {
                 if note.cost != nil || analysisCost != nil {
                     note.cost = (note.cost ?? 0) + (analysisCost ?? 0)
                 }
-                let updated = try store.update(record, with: note)
+                _ = try store.update(record, with: note)
                 reloadTranscripts()
-                if settings.obsidianExportEnabled, !settings.obsidianExportPath.isEmpty {
-                    try? store.exportCopy(of: updated, to: URL(filePath: settings.obsidianExportPath))
-                }
             } catch {
                 libraryAlert = "Notes couldn't be regenerated: \(error.localizedDescription)"
             }
@@ -568,6 +565,37 @@ final class AppModel: ObservableObject {
 
     func requestSearchFocus() {
         searchFocusToken += 1
+    }
+
+    // MARK: - Obsidian vault link
+
+    var obsidianVaultURL: URL? {
+        settings.obsidianVaultPath.isEmpty ? nil : URL(filePath: settings.obsidianVaultPath)
+    }
+
+    var obsidianVaultLinked: Bool {
+        guard let vault = obsidianVaultURL else { return false }
+        return ObsidianVaultLink.isLinked(vaultRoot: vault, transcriptsURL: store.transcriptsURL)
+    }
+
+    func linkObsidianVault(at vaultRoot: URL) throws {
+        try store.prepareDirectories()
+        _ = try ObsidianVaultLink.link(vaultRoot: vaultRoot, transcriptsURL: store.transcriptsURL)
+        settings.obsidianVaultPath = vaultRoot.path
+    }
+
+    func unlinkObsidianVault() {
+        if let vault = obsidianVaultURL {
+            try? ObsidianVaultLink.unlink(vaultRoot: vault, transcriptsURL: store.transcriptsURL)
+        }
+        settings.obsidianVaultPath = ""
+    }
+
+    func openInObsidian(_ record: TranscriptRecord) {
+        guard let vault = obsidianVaultURL,
+              let url = ObsidianVaultLink.openURL(for: record, vaultRoot: vault)
+        else { return }
+        NSWorkspace.shared.open(url)
     }
 
     private func startRecording(_ candidate: MeetingCandidate) {
@@ -692,10 +720,6 @@ final class AppModel: ObservableObject {
 
         reloadTranscripts()
         let finalRecord = transcripts.first { $0.id == note.id } ?? record
-
-        if settings.obsidianExportEnabled, !settings.obsidianExportPath.isEmpty {
-            try? store.exportCopy(of: finalRecord, to: URL(filePath: settings.obsidianExportPath))
-        }
         presentPendingCandidateOr(.completed(finalRecord))
     }
 

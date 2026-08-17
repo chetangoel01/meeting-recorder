@@ -16,7 +16,7 @@ struct SettingsView: View {
                 .tabItem { Label("General", systemImage: "gearshape") }
             TranscriptionSettingsPane(model: model, settings: settings)
                 .tabItem { Label("Transcription", systemImage: "waveform") }
-            NotesSettingsPane(settings: settings)
+            NotesSettingsPane(model: model, settings: settings)
                 .tabItem { Label("Notes", systemImage: "text.document") }
         }
         .frame(width: 560)
@@ -85,11 +85,11 @@ private struct TranscriptionSettingsPane: View {
     var body: some View {
         Form {
             Section("OpenRouter") {
-                LabeledContent("API key") {
-                    SecureField(model.hasAPIKey ? "Saved in Keychain" : "sk-or-v1-…", text: $apiKey)
-                        .textFieldStyle(.roundedBorder)
-                        .frame(width: 260)
-                }
+                SecureField(
+                    "API key",
+                    text: $apiKey,
+                    prompt: Text(model.hasAPIKey ? "Saved in Keychain" : "sk-or-v1-…")
+                )
                 HStack {
                     Button(model.hasAPIKey ? "Replace key" : "Save key") {
                         do {
@@ -113,11 +113,11 @@ private struct TranscriptionSettingsPane: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
-                LabeledContent("Model") {
-                    TextField("openai/whisper-large-v3", text: $settings.transcriptionModel)
-                        .textFieldStyle(.roundedBorder)
-                        .frame(width: 260)
-                }
+                TextField(
+                    "Model",
+                    text: $settings.transcriptionModel,
+                    prompt: Text("openai/whisper-large-v3")
+                )
             }
 
             Section("Recording access") {
@@ -141,18 +141,20 @@ private struct TranscriptionSettingsPane: View {
 }
 
 private struct NotesSettingsPane: View {
+    @ObservedObject var model: AppModel
     @ObservedObject var settings: AppSettings
+    @State private var vaultLinkMessage: String?
 
     var body: some View {
         Form {
             Section {
                 Toggle("Write meeting notes with an LLM", isOn: $settings.analysisEnabled)
                 if settings.analysisEnabled {
-                    LabeledContent("Model") {
-                        TextField("deepseek/deepseek-v4-pro", text: $settings.analysisModel)
-                            .textFieldStyle(.roundedBorder)
-                            .frame(width: 260)
-                    }
+                    TextField(
+                        "Model",
+                        text: $settings.analysisModel,
+                        prompt: Text("deepseek/deepseek-v4-pro")
+                    )
                 }
                 Text("Writes detailed notes next to each transcript, names the meeting, and files it into a folder. Uses the same OpenRouter key.")
                     .font(.caption)
@@ -185,36 +187,63 @@ private struct NotesSettingsPane: View {
                         .disabled(settings.analysisPrompt == AnalysisClient.defaultInstructions)
                     }
                 }
+            }
 
-                Section("Obsidian") {
-                    Toggle("Copy finished notes into an Obsidian folder", isOn: $settings.obsidianExportEnabled)
-                        .onChange(of: settings.obsidianExportEnabled) {
-                            if settings.obsidianExportEnabled, settings.obsidianExportPath.isEmpty {
-                                settings.obsidianExportPath = AppSettings.defaultObsidianExportPath
+            Section("Obsidian") {
+                if let vaultURL = model.obsidianVaultURL {
+                    LabeledContent("Vault") {
+                        HStack(spacing: 8) {
+                            Text(vaultURL.lastPathComponent)
+                            if model.obsidianVaultLinked {
+                                Label("Linked", systemImage: "checkmark.circle.fill")
+                                    .foregroundStyle(.green)
+                            } else {
+                                Button("Repair link") { linkVault(at: vaultURL) }
                             }
-                        }
-                    if settings.obsidianExportEnabled {
-                        LabeledContent("Vault folder") {
-                            HStack {
-                                TextField("Path", text: $settings.obsidianExportPath)
-                                    .textFieldStyle(.roundedBorder)
-                                Button("Choose…") {
-                                    let panel = NSOpenPanel()
-                                    panel.canChooseFiles = false
-                                    panel.canChooseDirectories = true
-                                    panel.canCreateDirectories = true
-                                    if panel.runModal() == .OK, let url = panel.url {
-                                        settings.obsidianExportPath = url.path
-                                    }
-                                }
-                            }
-                            .frame(width: 300)
                         }
                     }
+                    Button("Unlink vault") {
+                        model.unlinkObsidianVault()
+                        vaultLinkMessage = nil
+                    }
+                    Text("Your meeting library appears in the vault as a “Meetings” folder — the same files the app manages, not copies. Unlinking removes the link only; no meetings are touched.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                } else {
+                    Button("Link Obsidian vault…") {
+                        let panel = NSOpenPanel()
+                        panel.canChooseFiles = false
+                        panel.canChooseDirectories = true
+                        panel.message = "Choose your Obsidian vault folder. A “Meetings” link to the meeting library will be created inside it."
+                        let defaultVault = URL(filePath: AppSettings.defaultObsidianVaultPath)
+                        if FileManager.default.fileExists(atPath: defaultVault.path) {
+                            panel.directoryURL = defaultVault
+                        }
+                        if panel.runModal() == .OK, let url = panel.url {
+                            linkVault(at: url)
+                        }
+                    }
+                    Text("Puts a “Meetings” link inside your vault pointing at the meeting library, so Obsidian's navigation, search, and backlinks work on the real notes — one source of truth. Symlinked folders don't sync to Obsidian mobile.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                if let vaultLinkMessage {
+                    Text(vaultLinkMessage)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                 }
             }
         }
         .formStyle(.grouped)
+    }
+
+    private func linkVault(at url: URL) {
+        do {
+            try model.linkObsidianVault(at: url)
+            vaultLinkMessage = "Linked. Open Obsidian and look for the “Meetings” folder."
+        } catch {
+            vaultLinkMessage = "The vault couldn't be linked: \(error.localizedDescription)"
+        }
     }
 }
 
