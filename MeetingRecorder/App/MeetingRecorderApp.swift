@@ -58,6 +58,14 @@ private struct LibraryCommands: Commands {
                 .keyboardShortcut("2")
             Divider()
         }
+        CommandGroup(replacing: .help) {
+            Button("Meeting Recorder Help") {
+                NSWorkspace.shared.open(AppLinks.help)
+            }
+            Button("Report an Issue…") {
+                NSWorkspace.shared.open(AppLinks.issues)
+            }
+        }
     }
 }
 

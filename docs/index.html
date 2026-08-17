@@ -1,0 +1,489 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Meeting Recorder for Mac</title>
+<meta name="description" content="A native macOS menu-bar utility that detects meetings, asks before recording, captures microphone and system audio separately, and creates transcripts and notes.">
+<link rel="icon" type="image/png" href="favicon.png">
+<meta property="og:title" content="Meeting Recorder for Mac">
+<meta property="og:description" content="Free, open-source meeting recording for macOS. Separate mic and system-audio tracks, Me/Them transcripts, and Markdown notes.">
+<meta property="og:image" content="https://chetangoel01.github.io/meeting-recorder/screenshots/library.png">
+<style>
+  :root {
+    --cream: oklch(0.965 0.015 85);
+    --ink: oklch(0.24 0.012 85);
+    --ink-60: oklch(0.24 0.012 85 / 0.62);
+    --ink-40: oklch(0.24 0.012 85 / 0.42);
+    --hairline: oklch(0.24 0.012 85 / 0.14);
+    --blue: oklch(0.52 0.13 240);
+    --blue-press: oklch(0.46 0.13 240);
+    --coral: oklch(0.62 0.19 25);
+    --night: oklch(0.145 0.008 265);
+    --night-2: oklch(0.20 0.010 265);
+    --night-text: oklch(0.94 0.006 265);
+    --night-soft: oklch(0.70 0.010 265);
+    --night-hairline: oklch(0.94 0.006 265 / 0.14);
+    --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
+    --ease-in-out: cubic-bezier(0.77, 0, 0.175, 1);
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif;
+    background: var(--cream);
+    color: var(--ink);
+    line-height: 1.55;
+    -webkit-font-smoothing: antialiased;
+  }
+  a { color: var(--blue); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  img { max-width: 100%; height: auto; display: block; }
+  button { font: inherit; border: none; background: none; cursor: pointer; color: inherit; }
+  :focus-visible { outline: 3px solid var(--blue); outline-offset: 2px; }
+  .wrap { max-width: 1080px; margin: 0 auto; padding: 0 clamp(20px, 4vw, 48px); }
+
+  /* ── Menu bar ─────────────────────────────────────────────── */
+  .menubar {
+    height: 38px;
+    border-bottom: 1px solid var(--hairline);
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 0 clamp(14px, 2vw, 22px);
+    font-size: 13px;
+  }
+  .menubar .app { display: flex; align-items: center; gap: 8px; font-weight: 600; color: var(--ink); }
+  .menubar .app img { width: 18px; height: 18px; }
+  .menubar nav { display: flex; gap: clamp(14px, 2.4vw, 26px); }
+  .menubar nav a { color: var(--ink-60); }
+  .menubar nav a:hover { color: var(--ink); text-decoration: none; }
+
+  /* ── Notch ────────────────────────────────────────────────── */
+  .notch-seat { display: flex; justify-content: center; }
+  .notch {
+    display: flex; align-items: stretch;
+    background: var(--night);
+    color: var(--night-text);
+    height: 46px;
+    border-radius: 0 0 14px 14px;
+    max-width: 640px; width: 100%;
+    font-size: 12px;
+  }
+  .wing {
+    position: relative; flex: 1;
+    clip-path: inset(0 0 0 0);
+    transition: clip-path 240ms var(--ease-out);
+  }
+  .camera { width: clamp(96px, 14vw, 172px); flex-shrink: 0; }
+  .notch[data-state="idle"] .wing.left  { clip-path: inset(0 0 0 100%); }
+  .notch[data-state="idle"] .wing.right { clip-path: inset(0 100% 0 0); }
+  .st {
+    position: absolute; inset: 0;
+    display: flex; align-items: center; gap: 8px;
+    opacity: 0; visibility: hidden; transform: translateX(4px);
+    transition: opacity 160ms var(--ease-out), transform 160ms var(--ease-out), visibility 0s 160ms;
+  }
+  .wing.left .st { padding-left: 14px; justify-content: flex-start; }
+  .wing.right .st { padding-right: 12px; justify-content: flex-end; }
+  .notch[data-state="prompt"] .st[data-for="prompt"],
+  .notch[data-state="recording"] .st[data-for="recording"],
+  .notch[data-state="saved"] .st[data-for="saved"] {
+    opacity: 1; visibility: visible; transform: none; transition-delay: 0s;
+  }
+  .st .title { font-weight: 600; line-height: 1.25; }
+  .st .detail { font-size: 10px; color: var(--night-soft); line-height: 1.25; }
+  .badge {
+    width: 26px; height: 26px; border-radius: 50%;
+    background: var(--night-2);
+    display: grid; place-items: center; flex-shrink: 0;
+  }
+  .badge svg { width: 12px; height: 12px; }
+  .rec-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--coral); flex-shrink: 0; }
+  .timer { font-variant-numeric: tabular-nums; font-weight: 500; font-size: 11px; }
+  .nbtn {
+    height: 27px; padding: 0 11px; border-radius: 999px;
+    background: var(--night-2); color: var(--night-text);
+    font-size: 11px; font-weight: 500;
+    display: inline-flex; align-items: center; gap: 5px;
+    transition: transform 120ms var(--ease-out), background 140ms ease;
+  }
+  .nbtn:active { transform: scale(0.96); }
+  .nbtn.primary { background: var(--blue); font-weight: 600; }
+  .nbtn.icon { width: 27px; padding: 0; justify-content: center; }
+  .nbtn.stop { background: var(--coral); }
+  .nbtn svg { width: 11px; height: 11px; flex-shrink: 0; }
+  .nbtn[aria-pressed="false"] { color: var(--night-soft); }
+  @media (hover: hover) and (pointer: fine) {
+    .nbtn:hover { background: oklch(0.26 0.012 265); }
+    .nbtn.primary:hover { background: var(--blue-press); }
+    .nbtn.stop:hover { background: oklch(0.56 0.19 25); }
+  }
+  .notch-hint {
+    text-align: center; margin-top: 14px;
+    font-size: 13px; color: var(--ink-40);
+  }
+  @media (max-width: 560px) {
+    .notch { font-size: 11px; height: 44px; }
+    .st .detail { display: none; }
+    .nbtn { padding: 0 9px; }
+  }
+
+  /* ── Hero ─────────────────────────────────────────────────── */
+  .hero {
+    display: grid;
+    grid-template-columns: repeat(12, 1fr);
+    gap: clamp(20px, 3vw, 40px);
+    align-items: end;
+    padding: clamp(56px, 11vh, 128px) 0 clamp(28px, 4vh, 44px);
+  }
+  .hero h1 {
+    grid-column: 1 / 9;
+    font-size: clamp(2.75rem, 6.5vw, 5.5rem);
+    font-weight: 650;
+    line-height: 0.98;
+    letter-spacing: -0.042em;
+  }
+  .hero .get {
+    grid-column: 10 / 13;
+    display: flex; flex-direction: column; gap: 14px;
+    padding-bottom: 8px;
+  }
+  .dl {
+    display: inline-flex; align-items: center; justify-content: center;
+    background: var(--blue); color: oklch(0.98 0.005 240);
+    font-weight: 600; font-size: 15px;
+    height: 44px; border-radius: 9px;
+    transition: transform 120ms var(--ease-out), background 140ms ease;
+  }
+  .dl:hover { text-decoration: none; }
+  .dl:active { transform: scale(0.97); }
+  @media (hover: hover) and (pointer: fine) { .dl:hover { background: var(--blue-press); } }
+  .get small { color: var(--ink-60); font-size: 13px; line-height: 1.6; }
+  .hero-sub {
+    padding-bottom: clamp(48px, 8vh, 96px);
+    max-width: 46ch;
+    font-size: 17px;
+    color: var(--ink-60);
+  }
+  @media (max-width: 780px) {
+    .hero { grid-template-columns: 1fr; align-items: start; }
+    .hero h1, .hero .get { grid-column: 1 / -1; }
+    .hero .get { max-width: 300px; }
+  }
+
+  /* ── Proof rows ───────────────────────────────────────────── */
+  .row {
+    display: grid;
+    grid-template-columns: minmax(180px, 240px) minmax(0, 1fr);
+    gap: clamp(24px, 4vw, 64px);
+    padding: clamp(44px, 7vh, 80px) 0;
+    border-top: 1px solid var(--hairline);
+  }
+  .row h2 { font-size: 17px; font-weight: 650; letter-spacing: -0.01em; }
+  .row .why { margin-top: 8px; font-size: 14px; color: var(--ink-60); }
+  @media (max-width: 680px) { .row { grid-template-columns: 1fr; gap: 20px; } }
+
+  .lanes { display: grid; gap: 22px; align-self: center; }
+  .lane { display: grid; grid-template-columns: 110px 1fr; gap: 16px; align-items: center; }
+  .lane span { font-size: 13px; color: var(--ink-60); }
+  .lane svg { width: 100%; height: 36px; display: block; }
+  .lane.mic path { stroke: var(--blue); }
+  .lane.sys path { stroke: var(--ink-40); }
+
+  .excerpt { display: grid; gap: 18px; max-width: 56ch; }
+  .utt .who {
+    display: flex; align-items: baseline; gap: 8px;
+    font-size: 12px; font-weight: 600;
+  }
+  .utt .who .ts { font-weight: 400; color: var(--ink-40); font-variant-numeric: tabular-nums; }
+  .utt.me .who { color: var(--blue); }
+  .utt.them .who { color: var(--ink-60); }
+  .utt p { margin-top: 3px; font-size: 15px; }
+
+  .shotbleed { align-self: center; }
+  .shotbleed img {
+    border: 1px solid var(--hairline);
+    border-radius: 10px;
+    box-shadow: 0 10px 30px oklch(0.24 0.012 85 / 0.10);
+  }
+  .shotbleed figcaption { margin-top: 12px; font-size: 13px; color: var(--ink-40); }
+
+  .symlink {
+    font-family: ui-monospace, "SF Mono", Menlo, monospace;
+    font-size: 13.5px;
+    align-self: center;
+    overflow-x: auto; white-space: nowrap;
+    padding-bottom: 4px;
+  }
+  .symlink .arrow { color: var(--blue); }
+  .symlink .muted { color: var(--ink-40); }
+
+  /* ── Ledger ───────────────────────────────────────────────── */
+  .ledger-band {
+    background: var(--night); color: var(--night-text);
+    padding: clamp(56px, 9vh, 110px) 0;
+    margin-top: clamp(44px, 7vh, 80px);
+  }
+  .ledger-band h2 { font-size: clamp(1.5rem, 2.6vw, 1.9rem); font-weight: 650; letter-spacing: -0.02em; }
+  table.ledger {
+    margin-top: 36px; width: 100%;
+    border-collapse: collapse; font-size: 14.5px;
+  }
+  .ledger th {
+    text-align: left; font-weight: 500; font-size: 12.5px;
+    color: var(--night-soft);
+    padding: 0 20px 10px 0;
+  }
+  .ledger td {
+    border-top: 1px solid var(--night-hairline);
+    padding: 13px 20px 13px 0;
+    vertical-align: top;
+  }
+  .ledger td:last-child, .ledger th:last-child { padding-right: 0; }
+  .ledger .local { color: var(--night-text); }
+  .ledger .remote { color: oklch(0.78 0.10 240); }
+  .ledger-notes { margin-top: 28px; font-size: 13.5px; color: var(--night-soft); max-width: 62ch; display: grid; gap: 8px; }
+
+  /* ── Footer ───────────────────────────────────────────────── */
+  footer { padding: clamp(40px, 7vh, 72px) 0 56px; }
+  .foot-line {
+    display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+    font-size: 14px;
+  }
+  .foot-line img { width: 26px; height: 26px; }
+  .foot-line strong { font-weight: 600; margin-right: auto; }
+  .foot-line a { color: var(--ink-60); }
+  .foot-line a:hover { color: var(--ink); }
+  footer small { display: block; margin-top: 10px; color: var(--ink-40); font-size: 13px; }
+
+  @media (prefers-reduced-motion: reduce) {
+    .wing { transition: none; }
+    .st { transition: opacity 120ms ease; transform: none; }
+    .nbtn, .dl { transition: background 140ms ease; }
+    .nbtn:active, .dl:active { transform: none; }
+  }
+</style>
+</head>
+<body>
+
+<div class="menubar">
+  <span class="app"><img src="icon.png" alt="">Meeting Recorder</span>
+  <nav>
+    <a href="https://github.com/chetangoel01/meeting-recorder">GitHub</a>
+    <a href="https://github.com/chetangoel01/meeting-recorder/releases">Releases</a>
+    <a href="https://github.com/chetangoel01/meeting-recorder/releases/latest">Download</a>
+  </nav>
+</div>
+
+<div class="notch-seat">
+  <div class="notch" id="notch" data-state="prompt">
+    <div class="wing left">
+      <div class="st" data-for="prompt">
+        <span class="badge" aria-hidden="true">
+          <svg viewBox="0 0 16 16" fill="none" stroke="oklch(0.72 0.13 235)" stroke-width="1.4"><circle cx="8" cy="8" r="6.2"/><path d="M1.8 8h12.4M8 1.8c-4.4 4-4.4 8.4 0 12.4M8 1.8c4.4 4 4.4 8.4 0 12.4"/></svg>
+        </span>
+        <span>
+          <span class="title">Record this meeting?</span><br>
+          <span class="detail">Google Meet in Arc</span>
+        </span>
+      </div>
+      <div class="st" data-for="recording">
+        <span class="rec-dot" aria-hidden="true"></span>
+        <span>
+          <span class="title">Recording</span><br>
+          <span class="detail">Google Meet in Arc</span>
+        </span>
+      </div>
+      <div class="st" data-for="saved">
+        <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="oklch(0.72 0.14 150)" stroke-width="2" aria-hidden="true"><path d="M2.5 8.5l3.5 3.5 7-8"/></svg>
+        <span>
+          <span class="title">Transcript saved</span><br>
+          <span class="detail">Vendor intro call</span>
+        </span>
+      </div>
+    </div>
+    <div class="camera" aria-hidden="true"></div>
+    <div class="wing right">
+      <div class="st" data-for="prompt">
+        <button class="nbtn" id="dismiss">Not a meeting</button>
+        <button class="nbtn primary" id="record">
+          <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><circle cx="8" cy="8" r="6"/><circle cx="8" cy="8" r="2.4" fill="currentColor" stroke="none"/></svg>
+          Record
+        </button>
+      </div>
+      <div class="st" data-for="recording">
+        <span class="timer" id="timer">00:00</span>
+        <button class="nbtn icon" id="mic" aria-pressed="true" aria-label="Include microphone in recording">
+          <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><rect x="5.5" y="1.5" width="5" height="8" rx="2.5"/><path d="M3 7.5a5 5 0 0 0 10 0M8 12.5v2"/></svg>
+        </button>
+        <button class="nbtn icon" id="sys" aria-pressed="true" aria-label="Include call audio in recording">
+          <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M2.5 6v4h3l3.5 3V3L5.5 6h-3z" stroke-linejoin="round"/><path d="M11 5.5a3.5 3.5 0 0 1 0 5"/></svg>
+        </button>
+        <button class="nbtn icon stop" id="stop" aria-label="Stop recording">
+          <svg viewBox="0 0 16 16" aria-hidden="true"><rect x="4.5" y="4.5" width="7" height="7" rx="1" fill="currentColor"/></svg>
+        </button>
+      </div>
+      <div class="st" data-for="saved">
+        <button class="nbtn" id="again">Record again</button>
+        <button class="nbtn icon" id="close" aria-label="Dismiss">
+          <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><path d="M4 4l8 8M12 4l-8 8"/></svg>
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+<p class="notch-hint">The actual interface, rebuilt in HTML. Click Record.</p>
+
+<div class="wrap">
+  <section class="hero">
+    <h1>Meeting recording at the MacBook notch.</h1>
+    <div class="get">
+      <a class="dl" href="https://github.com/chetangoel01/meeting-recorder/releases/latest">Download for macOS</a>
+      <small>Free and open source<br>macOS 15 or later, signed and notarized<br>MIT license</small>
+    </div>
+  </section>
+  <p class="hero-sub">When Zoom, Teams, Webex, FaceTime, or a browser call starts, Meeting Recorder asks before recording. It captures microphone and system audio separately, then creates a Me/Them transcript and a Markdown note. There is no bot, no account, and no subscription. Transcription and analysis use your own OpenRouter key.</p>
+
+  <section class="row">
+    <div>
+      <h2>Two tracks, captured natively</h2>
+      <p class="why">ScreenCaptureKit records your microphone and the call as separate files, in two-minute recovery chunks that survive failures.</p>
+    </div>
+    <div class="lanes" aria-hidden="true">
+      <div class="lane mic">
+        <span>Microphone</span>
+        <svg viewBox="0 0 600 36" preserveAspectRatio="none" fill="none" stroke-width="1.5"><path d="M0 18 L30 18 40 10 48 26 56 14 64 22 72 18 110 18 118 8 126 28 134 12 142 24 150 16 158 20 166 18 230 18 238 12 246 24 254 10 262 26 270 16 278 20 286 18 360 18 368 14 376 22 384 8 392 28 400 14 408 22 416 18 470 18 478 12 486 24 494 16 502 20 510 18 600 18"/></svg>
+      </div>
+      <div class="lane sys">
+        <span>System audio</span>
+        <svg viewBox="0 0 600 36" preserveAspectRatio="none" fill="none" stroke-width="1.5"><path d="M0 18 L60 18 68 12 76 24 84 10 92 26 100 14 108 22 116 18 190 18 198 10 206 26 214 12 222 24 230 18 300 18 308 14 316 22 324 12 332 24 340 16 348 20 356 18 430 18 438 8 446 28 454 14 462 22 470 18 540 18 548 14 556 22 564 18 600 18"/></svg>
+      </div>
+    </div>
+  </section>
+
+  <section class="row">
+    <div>
+      <h2>A transcript that knows who spoke</h2>
+      <p class="why">The two tracks are transcribed separately and merged by timestamp. No diarization model, no guessing.</p>
+    </div>
+    <div class="excerpt">
+      <div class="utt me">
+        <div class="who">Me <span class="ts">0:00</span></div>
+        <p>Thanks for making time. We're evaluating logging vendors for the backend.</p>
+      </div>
+      <div class="utt them">
+        <div class="who">Them <span class="ts">0:16</span></div>
+        <p>Happy to walk through it. Most teams your size start on the free tier.</p>
+      </div>
+      <div class="utt me">
+        <div class="who">Me <span class="ts">0:31</span></div>
+        <p>Before pricing, can we talk about self-hosting the ingest path?</p>
+      </div>
+    </div>
+  </section>
+
+  <section class="row" id="library">
+    <div>
+      <h2>Notes, filed in a library</h2>
+      <p class="why">An OpenRouter model writes the note sections you configure and files the meeting under its calendar event name. The prompt and model are editable, existing notes can be regenerated, and each meeting shows its exact API cost.</p>
+    </div>
+    <figure class="shotbleed">
+      <img src="screenshots/library.png" alt="Meeting Library window: folder sidebar, meeting list, and a note with summary, decisions, and action items" width="1800" height="1120">
+      <figcaption>Folders, search, rename, and drag-in import of audio or transcript files.</figcaption>
+    </figure>
+  </section>
+
+  <section class="row">
+    <div>
+      <h2>The same files, inside Obsidian</h2>
+      <p class="why">Link a vault and a Meetings symlink points at the app's Markdown library. Obsidian reads the same files, and every meeting includes Open in Obsidian.</p>
+    </div>
+    <div class="symlink">Vault/Meetings <span class="arrow">→</span> ~/Library/<span class="muted">…</span>/Meeting Recorder/Transcripts</div>
+  </section>
+</div>
+
+<section class="ledger-band">
+  <div class="wrap">
+    <h2>What stays local. What is sent.</h2>
+    <table class="ledger">
+      <thead>
+        <tr><th scope="col">Stage</th><th scope="col">Data</th><th scope="col">Where it goes</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>Recording</td><td>Microphone and system-audio chunks</td><td class="local">This Mac</td></tr>
+        <tr><td>Transcription</td><td>Audio chunks</td><td class="remote">OpenRouter, with your key</td></tr>
+        <tr><td>Analysis</td><td>Transcript text</td><td class="remote">OpenRouter, with your key</td></tr>
+        <tr><td>Library</td><td>Markdown notes and transcripts</td><td class="local">This Mac</td></tr>
+      </tbody>
+    </table>
+    <div class="ledger-notes">
+      <p>Failed transcription keeps the recording on disk, and Retry is offered at the notch. Successful recordings are deleted unless you choose to keep them.</p>
+      <p>No bot joins the call. You remain responsible for any recording consent your location or participants require.</p>
+    </div>
+  </div>
+</section>
+
+<div class="wrap">
+  <footer>
+    <div class="foot-line">
+      <img src="icon.png" alt="">
+      <strong>Meeting Recorder</strong>
+      <a href="https://github.com/chetangoel01/meeting-recorder/releases/latest">Download</a>
+      <a href="https://github.com/chetangoel01/meeting-recorder">Source</a>
+      <a href="https://github.com/chetangoel01/meeting-recorder/issues">Issues</a>
+      <a href="https://github.com/chetangoel01/meeting-recorder/releases">Changelog</a>
+    </div>
+    <small>Free software for macOS 15 and later. Built by Chetan Goel.</small>
+  </footer>
+</div>
+
+<script>
+  (function () {
+    var notch = document.getElementById('notch');
+    var timerEl = document.getElementById('timer');
+    var seconds = 0, interval = null;
+
+    function setState(state) { notch.dataset.state = state; }
+
+    function startTimer() {
+      seconds = 0;
+      timerEl.textContent = '00:00';
+      interval = setInterval(function () {
+        seconds += 1;
+        var m = String(Math.floor(seconds / 60)).padStart(2, '0');
+        var s = String(seconds % 60).padStart(2, '0');
+        timerEl.textContent = m + ':' + s;
+      }, 1000);
+    }
+
+    function stopTimer() { clearInterval(interval); interval = null; }
+
+    document.getElementById('record').addEventListener('click', function () {
+      setState('recording');
+      startTimer();
+    });
+    document.getElementById('stop').addEventListener('click', function () {
+      stopTimer();
+      setState('saved');
+    });
+    document.getElementById('again').addEventListener('click', function () {
+      setState('recording');
+      startTimer();
+    });
+    document.getElementById('dismiss').addEventListener('click', function () {
+      setState('idle');
+      setTimeout(function () { setState('prompt'); }, 1100);
+    });
+    document.getElementById('close').addEventListener('click', function () {
+      setState('idle');
+      setTimeout(function () { setState('prompt'); }, 1100);
+    });
+    ['mic', 'sys'].forEach(function (id) {
+      var b = document.getElementById(id);
+      b.addEventListener('click', function () {
+        b.setAttribute('aria-pressed', b.getAttribute('aria-pressed') === 'true' ? 'false' : 'true');
+      });
+    });
+  })();
+</script>
+
+</body>
+</html>

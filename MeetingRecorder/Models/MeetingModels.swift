@@ -1,5 +1,10 @@
 import Foundation
 
+enum AppLinks {
+    static let help = URL(string: "https://chetangoel01.github.io/meeting-recorder/")!
+    static let issues = URL(string: "https://github.com/chetangoel01/meeting-recorder/issues")!
+}
+
 struct MeetingCandidate: Identifiable, Equatable, Sendable {
     enum Trigger: String, Sendable {
         case nativeApp

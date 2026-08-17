@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 
 struct MenuBarContent: View {
@@ -32,6 +33,13 @@ struct MenuBarContent: View {
 
         SettingsLink {
             Label("Settings…", systemImage: "gearshape")
+        }
+        Button("Help", systemImage: "questionmark.circle") {
+            NSWorkspace.shared.open(AppLinks.help)
+        }
+        Button("About Meeting Recorder", systemImage: "info.circle") {
+            NSApp.activate(ignoringOtherApps: true)
+            NSApp.orderFrontStandardAboutPanel(nil)
         }
         Button("Quit Meeting Recorder", systemImage: "power") {
             NSApp.terminate(nil)
