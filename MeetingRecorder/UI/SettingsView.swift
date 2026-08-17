@@ -161,34 +161,6 @@ private struct NotesSettingsPane: View {
                     .foregroundStyle(.secondary)
             }
 
-            if settings.analysisEnabled {
-                Section("Notes prompt") {
-                    TextEditor(text: $settings.analysisPrompt)
-                        .font(.system(.caption, design: .monospaced))
-                        .frame(minHeight: 200)
-                        .scrollContentBackground(.hidden)
-                        .padding(6)
-                        .background(
-                            RoundedRectangle(cornerRadius: 6)
-                                .fill(Color(nsColor: .textBackgroundColor))
-                        )
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 6)
-                                .stroke(.separator, lineWidth: 1)
-                        )
-                    HStack {
-                        Text("Sections, tone, language, and detail level are yours to change. Titling and folder filing keep working. Test edits by importing a transcript.")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                        Spacer()
-                        Button("Reset to default") {
-                            settings.analysisPrompt = AnalysisClient.defaultInstructions
-                        }
-                        .disabled(settings.analysisPrompt == AnalysisClient.defaultInstructions)
-                    }
-                }
-            }
-
             Section("Obsidian") {
                 if let vaultURL = model.obsidianVaultURL {
                     LabeledContent("Vault") {
@@ -233,6 +205,35 @@ private struct NotesSettingsPane: View {
                         .foregroundStyle(.secondary)
                 }
             }
+
+            if settings.analysisEnabled {
+                Section("Notes prompt") {
+                    TextEditor(text: $settings.analysisPrompt)
+                        .font(.system(.caption, design: .monospaced))
+                        .frame(minHeight: 200)
+                        .scrollContentBackground(.hidden)
+                        .padding(6)
+                        .background(
+                            RoundedRectangle(cornerRadius: 6)
+                                .fill(Color(nsColor: .textBackgroundColor))
+                        )
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 6)
+                                .stroke(.separator, lineWidth: 1)
+                        )
+                    HStack {
+                        Text("Sections, tone, language, and detail level are yours to change. Titling and folder filing keep working. Test edits by importing a transcript.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        Spacer()
+                        Button("Reset to default") {
+                            settings.analysisPrompt = AnalysisClient.defaultInstructions
+                        }
+                        .disabled(settings.analysisPrompt == AnalysisClient.defaultInstructions)
+                    }
+                }
+            }
+
         }
         .formStyle(.grouped)
     }
