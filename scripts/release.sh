@@ -110,6 +110,22 @@ else
     hdiutil create -volname "$APP_NAME" -srcfolder "$DMG_ROOT" -ov -format UDZO "$DMG" -quiet
 fi
 
+# Notarize and staple the DMG itself, not just the app inside — an unstapled
+# DMG spctl-rejects with "no usable signature" even when its app is fine.
+echo "==> Notarizing DMG"
+xcrun notarytool submit "$DMG" --keychain-profile "$PROFILE" --wait
+xcrun stapler staple "$DMG"
+
+echo "==> Verifying DMG and its contents"
+# The DMG spctl verdict is informational: the DMG is notarized but unsigned
+# (cloud signing can't sign DMGs), and Gatekeeper only gates the app inside.
+spctl -a -vv -t open --context context:primary-signature "$DMG" || true
+DMG_MOUNT="$BUILD_DIR/dmg-verify"
+hdiutil attach "$DMG" -nobrowse -readonly -mountpoint "$DMG_MOUNT" -quiet
+spctl -a -vv --type execute "$DMG_MOUNT/$APP_NAME.app"
+xcrun stapler validate "$DMG_MOUNT/$APP_NAME.app"
+hdiutil detach "$DMG_MOUNT" -quiet
+
 if [[ $PUBLISH == 1 ]]; then
     echo "==> Publishing $TAG"
     git tag "$TAG"
