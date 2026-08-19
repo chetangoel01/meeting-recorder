@@ -116,10 +116,10 @@ echo "==> Notarizing DMG"
 xcrun notarytool submit "$DMG" --keychain-profile "$PROFILE" --wait
 xcrun stapler staple "$DMG"
 
-echo "==> Verifying DMG and its contents"
-# The DMG spctl verdict is informational: the DMG is notarized but unsigned
-# (cloud signing can't sign DMGs), and Gatekeeper only gates the app inside.
-spctl -a -vv -t open --context context:primary-signature "$DMG" || true
+echo "==> Verifying DMG contents"
+# Don't spctl-assess the DMG itself: it is notarized+stapled but unsigned
+# (cloud signing can't sign DMGs), so spctl always says "rejected / no usable
+# signature" — a false alarm. Gatekeeper only gates the app inside.
 DMG_MOUNT="$BUILD_DIR/dmg-verify"
 hdiutil attach "$DMG" -nobrowse -readonly -mountpoint "$DMG_MOUNT" -quiet
 spctl -a -vv --type execute "$DMG_MOUNT/$APP_NAME.app"
