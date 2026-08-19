@@ -128,6 +128,7 @@ final class AppModel: ObservableObject {
         recorder.failureHandler = { [weak self] error in
             self?.activeRecordingDidFail(error)
         }
+        recoverOrphanedRecordings()
         activityMonitor.start()
 
         if settings.launchAtLogin {
@@ -596,6 +597,73 @@ final class AppModel: ObservableObject {
               let url = ObsidianVaultLink.openURL(for: record, vaultRoot: vault)
         else { return }
         NSWorkspace.shared.open(url)
+    }
+
+    // MARK: - Crash recovery
+
+    // A crash mid-recording strands the captured segments in a hidden work
+    // directory. Finalize them on the next launch and feed the result through
+    // the normal pipeline so the meeting lands in the library. The candidate
+    // list is captured synchronously — before any monitor callback can start a
+    // new recording — and the sweep is skipped while a second instance of the
+    // app is running, so no listed directory can still have a live writer.
+    private func recoverOrphanedRecordings() {
+        if let bundleID = Bundle.main.bundleIdentifier,
+           NSRunningApplication.runningApplications(withBundleIdentifier: bundleID).count > 1 {
+            return
+        }
+        let orphans = RecordingRecovery.orphanedWorkDirectories(
+            in: store.recordingsURL,
+            excluding: recorder.activeWorkDirectory
+        )
+        guard !orphans.isEmpty else { return }
+
+        Task {
+            for directory in orphans {
+                // A prompt, live recording, or a failure showing its retry UI
+                // takes priority; leftovers keep until the next launch.
+                switch phase {
+                case .idle, .completed:
+                    await recoverRecording(at: directory)
+                default:
+                    return
+                }
+            }
+        }
+    }
+
+    private func recoverRecording(at directory: URL) async {
+        phase = .saving
+        currentSession = nil
+        currentAudioURL = nil
+        currentArtifacts = nil
+        do {
+            guard let recovered = try await RecordingRecovery.recover(
+                workDirectory: directory,
+                into: store
+            ) else {
+                presentPendingCandidateOr(.idle)
+                return
+            }
+            let session = RecordingSession(
+                candidate: MeetingCandidate(
+                    id: "recovered:\(directory.lastPathComponent)",
+                    appName: "Recovered",
+                    bundleIdentifier: nil,
+                    processIdentifier: nil,
+                    trigger: .manual
+                ),
+                startedAt: recovered.startedAt
+            )
+            currentSession = session
+            currentAudioURL = recovered.artifacts.combinedURL
+            currentArtifacts = recovered.artifacts
+            try await processRecording(artifacts: recovered.artifacts, session: session)
+        } catch {
+            presentPendingCandidateOr(
+                .failed(message: error.localizedDescription, audioURL: currentAudioURL)
+            )
+        }
     }
 
     private func startRecording(_ candidate: MeetingCandidate) {
