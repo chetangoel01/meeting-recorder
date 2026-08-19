@@ -93,6 +93,10 @@ final class ScreenAudioRecorder: NSObject, SCStreamDelegate {
 
     var isRecording: Bool { stream != nil }
 
+    // Exposed so the launch-time orphan sweep can never mistake the live
+    // recording's segment directory for a leftover from a crash.
+    var activeWorkDirectory: URL? { workDirectory }
+
     func setMicrophoneIncluded(_ included: Bool) {
         captureOutput?.setIncluded(included, source: .microphone)
     }
@@ -158,7 +162,7 @@ final class ScreenAudioRecorder: NSObject, SCStreamDelegate {
 
         try store.prepareDirectories()
         let workDirectory = store.recordingsURL.appending(
-            path: ".capture-\(UUID().uuidString)",
+            path: "\(RecordingRecovery.workDirectoryPrefix)\(UUID().uuidString)",
             directoryHint: .isDirectory
         )
         try FileManager.default.createDirectory(at: workDirectory, withIntermediateDirectories: true)
@@ -252,8 +256,8 @@ final class ScreenAudioRecorder: NSObject, SCStreamDelegate {
 
         let artifacts = RecordingArtifacts(
             combinedURL: audioURL,
-            microphoneURL: await mixTrack(.microphone, from: result.segments, origin: origin),
-            systemURL: await mixTrack(.system, from: result.segments, origin: origin)
+            microphoneURL: await Self.mixTrack(.microphone, from: result.segments, origin: origin, store: store),
+            systemURL: await Self.mixTrack(.system, from: result.segments, origin: origin, store: store)
         )
         lastArtifacts = artifacts
         try? FileManager.default.removeItem(at: workDirectory)
@@ -275,10 +279,11 @@ final class ScreenAudioRecorder: NSObject, SCStreamDelegate {
     // Per-source tracks are best-effort: a failed track mix degrades speaker
     // attribution, never the recording itself. Both sources must be present —
     // a single-source recording has nothing to attribute.
-    private func mixTrack(
+    fileprivate static func mixTrack(
         _ source: AudioSource,
         from segments: [AudioSegment],
-        origin: CMTime
+        origin: CMTime,
+        store: TranscriptStore
     ) async -> URL? {
         let sourceSegments = segments.filter { $0.source == source }
         guard !sourceSegments.isEmpty, sourceSegments.count < segments.count else { return nil }
@@ -364,7 +369,7 @@ final class ScreenAudioRecorder: NSObject, SCStreamDelegate {
         return content.displays.first { $0.displayID == displayID } ?? content.displays.first
     }
 
-    private static func mixAudioSegments(
+    fileprivate static func mixAudioSegments(
         _ segments: [AudioSegment],
         origin: CMTime,
         minimumDuration: TimeInterval,
@@ -429,7 +434,113 @@ final class ScreenAudioRecorder: NSObject, SCStreamDelegate {
     }
 }
 
-private enum AudioSource: String, Sendable {
+// MARK: - Crash recovery
+
+struct RecoveredRecording: Sendable {
+    let artifacts: RecordingArtifacts
+    let startedAt: Date
+}
+
+// Finalizes audio stranded in segment work directories when the app (or the
+// whole Mac) died mid-recording. Only this app writes those directories, so a
+// sweep is safe once the caller has confirmed no second app instance is
+// running and has excluded the live recording's own directory.
+enum RecordingRecovery {
+    static let workDirectoryPrefix = ".capture-"
+
+    static func orphanedWorkDirectories(
+        in recordingsURL: URL,
+        excluding activeDirectory: URL?
+    ) -> [URL] {
+        // No .skipsHiddenFiles: the work directories are deliberately
+        // dot-prefixed so Finder and the library never show them.
+        let urls = (try? FileManager.default.contentsOfDirectory(
+            at: recordingsURL,
+            includingPropertiesForKeys: [.isDirectoryKey],
+            options: []
+        )) ?? []
+        return urls
+            .filter { url in
+                url.lastPathComponent.hasPrefix(workDirectoryPrefix)
+                    && (try? url.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true
+                    && url.standardizedFileURL.path != activeDirectory?.standardizedFileURL.path
+            }
+            .sorted { $0.lastPathComponent < $1.lastPathComponent }
+    }
+
+    static func parseSegmentFilename(_ filename: String) -> (source: AudioSource, index: Int)? {
+        guard filename.hasSuffix(".m4a") else { return nil }
+        let stem = filename.dropLast(4)
+        guard let dash = stem.lastIndex(of: "-"),
+              let source = AudioSource(rawValue: String(stem[..<dash])),
+              let index = Int(stem[stem.index(after: dash)...]),
+              index >= 0
+        else { return nil }
+        return (source, index)
+    }
+
+    // Mixes whatever the crashed recording left behind into the same artifact
+    // set a clean stop produces, and removes the work directory. Returns nil
+    // (still cleaning up) when nothing in the directory is readable audio.
+    static func recover(
+        workDirectory: URL,
+        into store: TranscriptStore
+    ) async throws -> RecoveredRecording? {
+        let fileURLs = (try? FileManager.default.contentsOfDirectory(
+            at: workDirectory,
+            includingPropertiesForKeys: [.creationDateKey],
+            options: []
+        )) ?? []
+        let named = fileURLs.compactMap { url -> (source: AudioSource, index: Int, url: URL)? in
+            guard let parsed = parseSegmentFilename(url.lastPathComponent) else { return nil }
+            return (parsed.source, parsed.index, url)
+        }
+
+        // The crash destroyed the capture timeline, so rebuild each source's
+        // segments back to back: a segment starts where its predecessor rolled
+        // over, and both sources began together at capture start. The tail
+        // segment was never finalized and usually fails to load — skip it, and
+        // anything else that no longer parses as audio, keeping the rest.
+        var segments: [AudioSegment] = []
+        var nextStart: [AudioSource: CMTime] = [:]
+        for file in named.sorted(by: { ($0.source.rawValue, $0.index) < ($1.source.rawValue, $1.index) }) {
+            guard let duration = try? await AVURLAsset(url: file.url).load(.duration),
+                  duration.isNumeric, duration > .zero
+            else { continue }
+            let start = nextStart[file.source] ?? .zero
+            segments.append(AudioSegment(source: file.source, url: file.url, sourceStartTime: start))
+            nextStart[file.source] = start + duration
+        }
+
+        guard !segments.isEmpty else {
+            try? FileManager.default.removeItem(at: workDirectory)
+            return nil
+        }
+
+        let startedAt = named
+            .compactMap { try? $0.url.resourceValues(forKeys: [.creationDateKey]).creationDate }
+            .min()
+            ?? (try? workDirectory.resourceValues(forKeys: [.creationDateKey]).creationDate)
+            ?? .now
+
+        let audioURL = try store.newRecordingURL(extension: "m4a", suffix: "recovered")
+        try await ScreenAudioRecorder.mixAudioSegments(
+            segments,
+            origin: .zero,
+            minimumDuration: 0,
+            to: audioURL
+        )
+        let artifacts = RecordingArtifacts(
+            combinedURL: audioURL,
+            microphoneURL: await ScreenAudioRecorder.mixTrack(.microphone, from: segments, origin: .zero, store: store),
+            systemURL: await ScreenAudioRecorder.mixTrack(.system, from: segments, origin: .zero, store: store)
+        )
+        try? FileManager.default.removeItem(at: workDirectory)
+        return RecoveredRecording(artifacts: artifacts, startedAt: startedAt)
+    }
+}
+
+enum AudioSource: String, Sendable {
     case system
     case microphone
 }
