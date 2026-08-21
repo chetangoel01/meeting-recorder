@@ -12,9 +12,17 @@ The app icon uses the same visual language as the overlay: a light blue waveform
 
 There is no bot participant, hosted backend, or subscription. The app stores the OpenRouter key in Keychain and keeps meeting audio locally until transcription succeeds. Transcription and analysis both run through the user's own OpenRouter key.
 
-## Download
+## Install
 
-Grab the latest signed and notarized DMG from [Releases](https://github.com/chetangoel01/meeting-recorder/releases), open it, and drag Meeting Recorder into Applications. If you launch it from the wrong place, the app offers to move itself.
+With [Homebrew](https://brew.sh):
+
+```bash
+brew install chetangoel01/tap/meeting-recorder
+```
+
+Later releases arrive with `brew upgrade meeting-recorder`.
+
+Or grab the latest signed and notarized DMG from [Releases](https://github.com/chetangoel01/meeting-recorder/releases), open it, and drag Meeting Recorder into Applications. If you launch it from the wrong place, the app offers to move itself.
 
 First launch: enter an [OpenRouter](https://openrouter.ai) API key in Settings, grant Microphone and Screen & System Audio Recording access, and optionally grant Calendar access so meetings are named from your calendar. Transcribing a one-hour meeting costs a few cents; the analysis pass costs well under a cent.
 
@@ -98,7 +106,7 @@ xcodebuild test -project MeetingRecorder.xcodeproj -scheme MeetingRecorder -dest
 
 ## Releasing
 
-Bump `CFBundleShortVersionString` in `MeetingRecorder/Resources/Info.plist`, commit, then run `./scripts/release.sh`. The script archives with Developer ID signing, notarizes and staples, builds the styled DMG, tags the version, and publishes a GitHub release with the DMG attached. Pass `--no-publish` to stop after the DMG. Requires the `meeting-recorder` notarytool keychain profile, `create-dmg`, and an authenticated `gh` CLI.
+Bump `CFBundleShortVersionString` in `MeetingRecorder/Resources/Info.plist`, commit, then run `./scripts/release.sh`. The script archives with Developer ID signing, notarizes and staples, builds the styled DMG, tags the version, publishes a GitHub release with the DMG attached, and bumps the cask in [chetangoel01/homebrew-tap](https://github.com/chetangoel01/homebrew-tap). Pass `--no-publish` to stop after the DMG. Requires the `meeting-recorder` notarytool keychain profile, `create-dmg`, and an authenticated `gh` CLI.
 
 ## Known limitations
 

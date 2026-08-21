@@ -4,6 +4,8 @@
 # Prereqs: paid Apple Developer team, notarytool keychain profile
 # "meeting-recorder", gh CLI authenticated. Bump CFBundleShortVersionString in
 # project.yml before releasing; the version tag must not already exist.
+# Publishing also bumps the cask in chetangoel01/homebrew-tap so
+# `brew upgrade meeting-recorder` picks the release up.
 # Pass --no-publish to stop after building the DMG.
 set -euo pipefail
 
@@ -134,6 +136,17 @@ if [[ $PUBLISH == 1 ]]; then
         "$DMG#Meeting Recorder $VERSION (signed + notarized DMG)" \
         --title "Meeting Recorder $VERSION" \
         --generate-notes
+
+    echo "==> Updating Homebrew tap"
+    TAP_DIR="$BUILD_DIR/homebrew-tap"
+    CASK="$TAP_DIR/Casks/meeting-recorder.rb"
+    SHA256=$(shasum -a 256 "$DMG" | cut -d' ' -f1)
+    rm -rf "$TAP_DIR"
+    git clone -q "git@github.com:chetangoel01/homebrew-tap.git" "$TAP_DIR"
+    sed -i '' -E "s/^  version \".*\"/  version \"$VERSION\"/" "$CASK"
+    sed -i '' -E "s/^  sha256 \".*\"/  sha256 \"$SHA256\"/" "$CASK"
+    git -C "$TAP_DIR" commit -qam "meeting-recorder $VERSION"
+    git -C "$TAP_DIR" push -q origin main
 fi
 
 echo "==> Done"
