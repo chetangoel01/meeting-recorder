@@ -55,6 +55,7 @@ struct TranscriptionClient: Sendable {
         fileURL: URL,
         apiKey: String,
         model: String,
+        language: String? = nil,
         progress: @escaping @MainActor @Sendable (Double) -> Void
     ) async throws -> TranscriptionResult {
         let chunks = try await splitIntoChunks(fileURL, chunkDuration: singleTrackChunkDuration)
@@ -65,7 +66,7 @@ struct TranscriptionClient: Sendable {
         var receivedCost = false
 
         for (index, chunk) in chunks.enumerated() {
-            let result = try await transcribeChunk(chunk.url, apiKey: apiKey, model: model)
+            let result = try await transcribeChunk(chunk.url, apiKey: apiKey, model: model, language: language)
             transcriptParts.append(result.text)
             if let cost = result.cost {
                 totalCost += cost
@@ -88,6 +89,7 @@ struct TranscriptionClient: Sendable {
         systemURL: URL,
         apiKey: String,
         model: String,
+        language: String? = nil,
         progress: @escaping @MainActor @Sendable (Double) -> Void
     ) async throws -> DualTrackTranscription {
         let microphoneChunks = try await splitIntoChunks(microphoneURL, chunkDuration: trackChunkDuration)
@@ -111,7 +113,7 @@ struct TranscriptionClient: Sendable {
         func transcribeAll(_ chunks: [AudioChunk]) async throws -> [TimedTranscriptChunk] {
             var results: [TimedTranscriptChunk] = []
             for chunk in chunks {
-                let result = try await transcribeChunk(chunk.url, apiKey: apiKey, model: model)
+                let result = try await transcribeChunk(chunk.url, apiKey: apiKey, model: model, language: language)
                 let text = result.text.trimmingCharacters(in: .whitespacesAndNewlines)
                 if !text.isEmpty {
                     results.append(TimedTranscriptChunk(offset: chunk.offset, text: text))
@@ -132,24 +134,41 @@ struct TranscriptionClient: Sendable {
         return DualTrackTranscription(me: me, them: them, cost: receivedCost ? totalCost : nil)
     }
 
-    private func transcribeChunk(_ url: URL, apiKey: String, model: String) async throws -> TranscriptionResult {
+    // Language is pinned when the caller knows it: Whisper detects language
+    // from the first ~30 seconds of each upload and applies it to the whole
+    // file, so one greeting in another language turns an entire chunk into
+    // that language. Segments are requested (verbose_json) so hallucinated
+    // filler can be dropped per segment; providers that reject that format
+    // get a plain json retry and a text-level filter instead.
+    private func transcribeChunk(
+        _ url: URL,
+        apiKey: String,
+        model: String,
+        language: String?
+    ) async throws -> TranscriptionResult {
         let audioData = try Data(contentsOf: url, options: .mappedIfSafe)
-        let requestBody = RequestBody(
-            model: model,
-            inputAudio: .init(data: audioData.base64EncodedString(), format: "m4a")
-        )
-
-        var request = URLRequest(url: endpoint)
-        request.httpMethod = "POST"
-        request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.setValue("Meeting Recorder", forHTTPHeaderField: "X-OpenRouter-Title")
-        request.httpBody = try JSONEncoder().encode(requestBody)
-        request.timeoutInterval = 120
+        let base64 = audioData.base64EncodedString()
+        let pinnedLanguage = language?.trimmingCharacters(in: .whitespacesAndNewlines)
 
         var lastError: (any Error)?
+        var verbose = true
         for delay in [UInt64(0), 2, 5] {
             if delay > 0 { try await Task.sleep(for: .seconds(delay)) }
+            let requestBody = RequestBody(
+                model: model,
+                language: (pinnedLanguage?.isEmpty ?? true) ? nil : pinnedLanguage,
+                temperature: 0,
+                responseFormat: verbose ? "verbose_json" : "json",
+                inputAudio: .init(data: base64, format: "m4a")
+            )
+            var request = URLRequest(url: endpoint)
+            request.httpMethod = "POST"
+            request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
+            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            request.setValue("Meeting Recorder", forHTTPHeaderField: "X-OpenRouter-Title")
+            request.httpBody = try JSONEncoder().encode(requestBody)
+            request.timeoutInterval = 120
+
             do {
                 let (data, response) = try await session.data(for: request)
                 guard let httpResponse = response as? HTTPURLResponse else {
@@ -163,11 +182,20 @@ struct TranscriptionClient: Sendable {
                 }
 
                 let decoded = try JSONDecoder().decode(ResponseBody.self, from: data)
-                return TranscriptionResult(text: decoded.text, cost: decoded.usage?.cost)
+                let text: String
+                if let segments = decoded.segments, !segments.isEmpty {
+                    text = TranscriptHallucinationFilter.clean(segments: segments.map(\.text))
+                        .joined(separator: " ")
+                } else {
+                    text = TranscriptHallucinationFilter.clean(text: decoded.text)
+                }
+                return TranscriptionResult(text: text, cost: decoded.usage?.cost)
             } catch {
                 lastError = error
-                if case TranscriptionError.server(let status, _) = error, status == 401 || status == 402 {
-                    throw error
+                if case TranscriptionError.server(let status, _) = error {
+                    if status == 401 || status == 402 { throw error }
+                    // Only OpenAI-compatible providers accept verbose_json.
+                    if status == 400, verbose { verbose = false }
                 }
             }
         }
@@ -257,10 +285,16 @@ private struct RequestBody: Encodable {
     }
 
     let model: String
+    let language: String?
+    let temperature: Double
+    let responseFormat: String
     let inputAudio: InputAudio
 
     enum CodingKeys: String, CodingKey {
         case model
+        case language
+        case temperature
+        case responseFormat = "response_format"
         case inputAudio = "input_audio"
     }
 }
@@ -270,8 +304,13 @@ private struct ResponseBody: Decodable {
         let cost: Double?
     }
 
+    struct Segment: Decodable {
+        let text: String
+    }
+
     let text: String
     let usage: Usage?
+    let segments: [Segment]?
 }
 
 private struct ErrorResponse: Decodable {

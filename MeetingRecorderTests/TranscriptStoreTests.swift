@@ -33,6 +33,19 @@ final class TranscriptStoreTests: XCTestCase {
         )
     }
 
+    func testSavingACollidingNoteNeverOverwritesTheExistingOne() throws {
+        let first = try store.save(makeNote(), folder: nil)
+        _ = try store.move(first, toFolder: "Design")
+        let second = try store.save(makeNote(), folder: nil)
+        let third = try store.save(makeNote(), folder: nil)
+
+        XCTAssertTrue(second.markdownURL.lastPathComponent.hasSuffix("-design-review-2.md"))
+        XCTAssertTrue(third.markdownURL.lastPathComponent.hasSuffix("-design-review-3.md"))
+        let secondText = try String(contentsOf: second.markdownURL, encoding: .utf8)
+        XCTAssertTrue(secondText.contains("-design-review-2.transcript.md\""))
+        XCTAssertEqual(store.loadTranscripts().count, 3)
+    }
+
     func testSavesNoteAndTranscriptAsSiblingFiles() throws {
         let note = makeNote(analysis: "## Summary\n\nShipped the smaller version.")
         let saved = try store.save(note, folder: nil)

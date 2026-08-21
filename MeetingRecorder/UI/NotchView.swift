@@ -11,6 +11,7 @@ struct NotchView: View {
     private let primaryText = Color(red: 0.94, green: 0.94, blue: 0.96)
     private let secondaryText = Color(red: 0.67, green: 0.68, blue: 0.73)
     private let recordingColor = Color(red: 0.92, green: 0.20, blue: 0.22)
+    private let warningColor = Color(red: 0.98, green: 0.70, blue: 0.22)
     private let actionColor = Color(red: 0.18, green: 0.58, blue: 0.88)
 
     var body: some View {
@@ -95,10 +96,17 @@ struct NotchView: View {
                             Text("Recording")
                                 .font(.system(size: 11, weight: .semibold))
                                 .foregroundStyle(primaryText)
-                            Text(session.candidate.appName)
-                                .font(.system(size: 9))
-                                .foregroundStyle(secondaryText)
-                                .lineLimit(1)
+                            if let warning = model.recordingWarning {
+                                Text(warning)
+                                    .font(.system(size: 9))
+                                    .foregroundStyle(warningColor)
+                                    .lineLimit(1)
+                            } else {
+                                Text(session.candidate.appName)
+                                    .font(.system(size: 9))
+                                    .foregroundStyle(secondaryText)
+                                    .lineLimit(1)
+                            }
                         }
                         iconButton(
                             "Minimize recording controls",

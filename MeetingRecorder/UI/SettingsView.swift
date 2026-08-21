@@ -30,6 +30,7 @@ struct SettingsView: View {
 private struct GeneralSettingsPane: View {
     @ObservedObject var model: AppModel
     @ObservedObject var settings: AppSettings
+    @State private var microphones: [ScreenAudioRecorder.MicrophoneDevice] = []
 
     var body: some View {
         Form {
@@ -65,6 +66,21 @@ private struct GeneralSettingsPane: View {
             }
 
             Section {
+                Picker("Microphone", selection: $settings.microphoneID) {
+                    Text("System default").tag("")
+                    ForEach(microphones) { microphone in
+                        Text(microphone.name).tag(microphone.id)
+                    }
+                    if !settings.microphoneID.isEmpty, !microphones.contains(where: { $0.id == settings.microphoneID }) {
+                        Text("Previously selected (not attached)").tag(settings.microphoneID)
+                    }
+                }
+                Text("Your side of the meeting is recorded from this microphone. If it isn't attached when a recording starts, the system default is used.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            Section {
                 Toggle("Keep audio after successful transcription", isOn: $settings.keepRecordings)
                 Button("Show transcript folder", action: model.revealTranscripts)
                 Text("Audio is always retained until transcription succeeds.")
@@ -73,6 +89,7 @@ private struct GeneralSettingsPane: View {
             }
         }
         .formStyle(.grouped)
+        .onAppear { microphones = ScreenAudioRecorder.availableMicrophones() }
     }
 }
 
@@ -118,6 +135,14 @@ private struct TranscriptionSettingsPane: View {
                     text: $settings.transcriptionModel,
                     prompt: Text("openai/whisper-large-v3")
                 )
+                Picker("Language", selection: $settings.transcriptionLanguage) {
+                    ForEach(AppSettings.transcriptionLanguages, id: \.code) { language in
+                        Text(language.name).tag(language.code)
+                    }
+                }
+                Text("Whisper picks one language per upload from its first few seconds. Pin the meeting language so a stray phrase can't flip minutes of transcript into another language.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
 
             Section("Recording access") {

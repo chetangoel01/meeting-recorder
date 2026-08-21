@@ -41,6 +41,8 @@ final class AppModel: ObservableObject {
     }
     @Published private(set) var transcripts: [TranscriptRecord] = []
     @Published private(set) var folders: [String] = []
+    // Degraded-capture notice shown while recording (mic missing, reconnecting).
+    @Published private(set) var recordingWarning: String?
     @Published private(set) var hasAPIKey = false
     @Published private(set) var microphoneAuthorized = false
     @Published private(set) var screenAuthorized = false
@@ -128,8 +130,12 @@ final class AppModel: ObservableObject {
         recorder.failureHandler = { [weak self] error in
             self?.activeRecordingDidFail(error)
         }
+        recorder.warningHandler = { [weak self] warning in
+            self?.recordingWarning = warning?.message
+        }
         recoverOrphanedRecordings()
         activityMonitor.start()
+        runCaptureHarnessIfRequested()
 
         if settings.launchAtLogin {
             setLaunchAtLogin(true)
@@ -185,6 +191,35 @@ final class AppModel: ObservableObject {
     func startManualRecording() {
         guard case .idle = phase else { return }
         startRecording(.manual)
+    }
+
+    // Headless capture harness for debug builds:
+    //   --start-recording                 start a manual recording after launch
+    //   --stop-after <seconds>            stop it (runs the normal pipeline)
+    //   --simulate-interruption-at <sec>  force the stream-restart path mid-recording
+    private func runCaptureHarnessIfRequested() {
+#if DEBUG
+        let arguments = ProcessInfo.processInfo.arguments
+        guard arguments.contains("--start-recording") else { return }
+        func seconds(after flag: String) -> Double? {
+            guard let index = arguments.firstIndex(of: flag), arguments.indices.contains(index + 1) else { return nil }
+            return Double(arguments[index + 1])
+        }
+        Task { @MainActor in
+            try? await Task.sleep(for: .seconds(1))
+            startManualRecording()
+            if let at = seconds(after: "--simulate-interruption-at") {
+                Task { @MainActor in
+                    try? await Task.sleep(for: .seconds(at))
+                    await recorder.simulateInterruption()
+                }
+            }
+            if let after = seconds(after: "--stop-after") {
+                try? await Task.sleep(for: .seconds(after))
+                stopRecording()
+            }
+        }
+#endif
     }
 
     func dismissPrompt() {
@@ -672,7 +707,7 @@ final class AppModel: ObservableObject {
         phase = .preparing(candidate)
         Task {
             do {
-                try await recorder.start(candidate: candidate)
+                try await recorder.start(candidate: candidate, microphoneID: settings.microphoneID)
                 let session = RecordingSession(candidate: candidate, startedAt: .now)
                 currentSession = session
                 currentAudioURL = nil
@@ -703,7 +738,7 @@ final class AppModel: ObservableObject {
 
         let duration = try await AVURLAsset(url: artifacts.combinedURL).load(.duration).seconds
         guard duration.isFinite, duration > 0 else {
-            throw RecordingError.exportFailed
+            throw RecordingError.exportFailed("The audio file is empty or unreadable.")
         }
 
         // Imported files carry transfer dates, not meeting times, so calendar
@@ -808,6 +843,7 @@ final class AppModel: ObservableObject {
                 systemURL: systemURL,
                 apiKey: apiKey,
                 model: settings.transcriptionModel,
+                language: settings.transcriptionLanguage,
                 progress: progressHandler
             )
             if !dual.isEmpty {
@@ -819,6 +855,7 @@ final class AppModel: ObservableObject {
             fileURL: artifacts.combinedURL,
             apiKey: apiKey,
             model: settings.transcriptionModel,
+            language: settings.transcriptionLanguage,
             progress: progressHandler
         )
         return (single.text, single.cost)

@@ -168,6 +168,10 @@ struct TranscriptHistoryView: View {
 
     private var recordList: some View {
         List(selection: $selectedRecordID) {
+            if case let .recording(session) = model.phase {
+                RecordingRow(model: model, session: session)
+                    .selectionDisabled()
+            }
             if let status = model.processingStatus {
                 ProcessingRow(status: status)
                     .selectionDisabled()
@@ -185,7 +189,7 @@ struct TranscriptHistoryView: View {
         .onChange(of: model.searchFocusToken) { searchFocused = true }
         .onDeleteCommand(perform: deleteSelectedRecord)
         .overlay {
-            if filteredRecords.isEmpty, model.processingStatus == nil {
+            if filteredRecords.isEmpty, model.processingStatus == nil, !model.phase.isRecording {
                 if searchText.isEmpty {
                     ContentUnavailableView {
                         Label("No meetings here", systemImage: "waveform")
@@ -298,6 +302,95 @@ struct TranscriptHistoryView: View {
 
 // The in-flight meeting, pinned above finished ones so recordings and imports
 // visibly land in the library instead of appearing out of nowhere.
+// Live recording status while a capture is running: the same controls the
+// notch offers, so the library window is a complete place to watch from.
+private struct RecordingRow: View {
+    @ObservedObject var model: AppModel
+    let session: RecordingSession
+
+    var body: some View {
+        TimelineView(.periodic(from: .now, by: 1)) { context in
+            VStack(alignment: .leading, spacing: 6) {
+                HStack(spacing: 8) {
+                    Circle()
+                        .fill(Self.recordingColor)
+                        .frame(width: 9, height: 9)
+                        .accessibilityHidden(true)
+                    Text("Recording")
+                        .font(.body.weight(.semibold))
+                        .lineLimit(1)
+                        .layoutPriority(2)
+                    Text(Self.elapsedString(context.date.timeIntervalSince(session.startedAt)))
+                        .font(.callout.monospacedDigit())
+                        .foregroundStyle(.secondary)
+                        .contentTransition(.numericText())
+                        .lineLimit(1)
+                        .layoutPriority(1)
+                    Spacer(minLength: 4)
+                    Button(action: model.stopRecording) {
+                        Image(systemName: "stop.fill")
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .tint(Self.recordingColor)
+                    .controlSize(.small)
+                    .help("Stop recording")
+                    .accessibilityLabel("Stop recording")
+                }
+                HStack(spacing: 8) {
+                    if let warning = model.recordingWarning {
+                        Label(warning, systemImage: "exclamationmark.triangle.fill")
+                            .font(.caption)
+                            .foregroundStyle(Color(red: 0.85, green: 0.55, blue: 0.10))
+                            .lineLimit(1)
+                            .truncationMode(.tail)
+                    } else {
+                        Text(session.candidate.appName)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                            .truncationMode(.tail)
+                    }
+                    Spacer(minLength: 4)
+                    Toggle(isOn: Binding(
+                        get: { model.microphoneIncluded },
+                        set: { _ in model.toggleMicrophoneIncluded() }
+                    )) {
+                        Image(systemName: model.microphoneIncluded ? "mic.fill" : "mic.slash.fill")
+                    }
+                    .toggleStyle(.button)
+                    .controlSize(.small)
+                    .help(model.microphoneIncluded ? "Exclude microphone from recording" : "Include microphone in recording")
+                    Toggle(isOn: Binding(
+                        get: { model.systemAudioIncluded },
+                        set: { _ in model.toggleSystemAudioIncluded() }
+                    )) {
+                        Image(systemName: model.systemAudioIncluded ? "speaker.wave.2.fill" : "speaker.slash.fill")
+                    }
+                    .toggleStyle(.button)
+                    .controlSize(.small)
+                    .help(model.systemAudioIncluded ? "Exclude call audio from recording" : "Include call audio in recording")
+                }
+            }
+            .padding(.vertical, 6)
+        }
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Recording in progress")
+    }
+
+    private static let recordingColor = Color(red: 0.92, green: 0.20, blue: 0.22)
+
+    private static func elapsedString(_ duration: TimeInterval) -> String {
+        let seconds = max(0, Int(duration))
+        let hours = seconds / 3600
+        let minutes = (seconds % 3600) / 60
+        let remainingSeconds = seconds % 60
+        if hours > 0 {
+            return String(format: "%d:%02d:%02d", hours, minutes, remainingSeconds)
+        }
+        return String(format: "%02d:%02d", minutes, remainingSeconds)
+    }
+}
+
 private struct ProcessingRow: View {
     let status: ProcessingStatus
 

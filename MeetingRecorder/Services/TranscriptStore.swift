@@ -287,7 +287,9 @@ struct TranscriptStore: Sendable {
             directory = transcriptsURL
         }
 
-        let baseName = "\(Self.filenameTimestamp(note.startedAt))-\(Self.safeFilename(note.title))"
+        let baseName = uniqueBaseName(
+            "\(Self.filenameTimestamp(note.startedAt))-\(Self.safeFilename(note.title))"
+        )
         var savedNote = note
         savedNote.transcriptFilename = baseName + Self.transcriptSuffix
 
@@ -299,6 +301,23 @@ struct TranscriptStore: Sendable {
         )
         try savedNote.renderedNote().write(to: markdownURL, atomically: true, encoding: .utf8)
         return record(for: savedNote, at: markdownURL, folder: cleanedFolder)
+    }
+
+    // Two notes can share a timestamp and title (re-importing the same file
+    // does, since the date comes from the file). Saving must never overwrite
+    // an existing note, and the name has to stay unique across folders too,
+    // because moving into a folder later reuses the same filename.
+    private func uniqueBaseName(_ baseName: String) -> String {
+        let directories = [transcriptsURL] + folders().map {
+            transcriptsURL.appending(path: $0, directoryHint: .isDirectory)
+        }
+        func taken(_ name: String) -> Bool {
+            directories.contains { FileManager.default.fileExists(atPath: $0.appending(path: "\(name).md").path) }
+        }
+        guard taken(baseName) else { return baseName }
+        var counter = 2
+        while taken("\(baseName)-\(counter)") { counter += 1 }
+        return "\(baseName)-\(counter)"
     }
 
     // Rewrites the note file in place (used to add analysis after the
