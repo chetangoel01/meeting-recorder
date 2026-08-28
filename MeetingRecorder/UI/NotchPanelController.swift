@@ -22,8 +22,7 @@ final class NotchPanelController {
     }
 
     func show() {
-        updateFrame(for: model.phase, collapsed: model.notchCollapsed, animated: false)
-        panel.orderFrontRegardless()
+        applyCurrentVisibility(animated: false)
     }
 
     private func configurePanel() {
@@ -50,31 +49,82 @@ final class NotchPanelController {
     }
 
     private func observeModel() {
-        Publishers.CombineLatest(
+        Publishers.CombineLatest3(
             model.$phase.removeDuplicates(),
-            model.$notchCollapsed.removeDuplicates()
+            model.$notchCollapsed.removeDuplicates(),
+            model.settings.$showsIdleNotchBar.removeDuplicates()
         )
             .receive(on: RunLoop.main)
-            .sink { [weak self] phase, collapsed in
-                self?.updateFrame(for: phase, collapsed: collapsed, animated: true)
+            .sink { [weak self] phase, collapsed, showsIdleBar in
+                self?.applyVisibility(
+                    phase: phase,
+                    collapsed: collapsed,
+                    showsIdleBar: showsIdleBar,
+                    animated: true
+                )
             }
             .store(in: &cancellables)
 
         NotificationCenter.default.publisher(for: NSApplication.didChangeScreenParametersNotification)
             .receive(on: RunLoop.main)
             .sink { [weak self] _ in
-                guard let self else { return }
-                self.updateFrame(
-                    for: self.model.phase,
-                    collapsed: self.model.notchCollapsed,
-                    animated: false
-                )
+                self?.applyCurrentVisibility(animated: false)
             }
             .store(in: &cancellables)
     }
 
-    private func updateFrame(for phase: RecorderPhase, collapsed: Bool, animated: Bool) {
-        guard let screen = Self.preferredScreen else { return }
+    private func applyCurrentVisibility(animated: Bool) {
+        applyVisibility(
+            phase: model.phase,
+            collapsed: model.notchCollapsed,
+            showsIdleBar: model.settings.showsIdleNotchBar,
+            animated: animated
+        )
+    }
+
+    private func applyVisibility(
+        phase: RecorderPhase,
+        collapsed: Bool,
+        showsIdleBar: Bool,
+        animated: Bool
+    ) {
+        guard NotchLayout.isOnScreen(phase: phase, showsIdleBar: showsIdleBar) else {
+            // Leave along the path it arrived on: shrink back to the notch
+            // first, then order out — unless a queued meeting has claimed the
+            // panel by the time the animation lands.
+            updateFrame(for: .idle, collapsed: false, animated: animated) { [weak self] in
+                guard let self, !self.shouldBeOnScreen else { return }
+                self.panel.orderOut(nil)
+            }
+            return
+        }
+
+        // Returning from hidden, seed the notch-sized frame before showing so
+        // the overlay grows out of it instead of appearing at full width.
+        if !panel.isVisible {
+            updateFrame(for: .idle, collapsed: false, animated: false)
+            panel.orderFrontRegardless()
+        }
+        updateFrame(for: phase, collapsed: collapsed, animated: animated)
+    }
+
+    private var shouldBeOnScreen: Bool {
+        NotchLayout.isOnScreen(
+            phase: model.phase,
+            showsIdleBar: model.settings.showsIdleNotchBar
+        )
+    }
+
+    private func updateFrame(
+        for phase: RecorderPhase,
+        collapsed: Bool,
+        animated: Bool,
+        completion: (@MainActor () -> Void)? = nil
+    ) {
+        guard let screen = Self.preferredScreen else {
+            completion?()
+            return
+        }
         let notch = Self.notchMetrics(for: screen)
         let size = NotchLayout.size(
             for: phase,
@@ -90,15 +140,20 @@ final class NotchPanelController {
         )
         panel.hasShadow = phase != .idle
 
-        let shouldAnimate = animated && !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+        let shouldAnimate = animated
+            && panel.isVisible
+            && !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
         if shouldAnimate {
             NSAnimationContext.runAnimationGroup { context in
                 context.duration = 0.32
                 context.timingFunction = CAMediaTimingFunction(controlPoints: 0.22, 1, 0.36, 1)
                 panel.animator().setFrame(frame, display: true)
+            } completionHandler: {
+                MainActor.assumeIsolated { completion?() }
             }
         } else {
             panel.setFrame(frame, display: true)
+            completion?()
         }
     }
 
@@ -125,6 +180,13 @@ final class NotchPanelController {
 }
 
 struct NotchLayout {
+    // The idle surface is there to disappear into a physical camera housing.
+    // Without one it is a dark bar across the menu bar, so it can be switched
+    // off — every active state still expands at the notch either way.
+    static func isOnScreen(phase: RecorderPhase, showsIdleBar: Bool) -> Bool {
+        showsIdleBar || !phase.isIdle
+    }
+
     static func size(
         for phase: RecorderPhase,
         collapsed: Bool,

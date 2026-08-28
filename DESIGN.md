@@ -43,7 +43,7 @@ Use the macOS system font. The notch uses 11 to 13 point labels with semibold em
 
 ### Idle notch
 
-The idle surface matches the measured camera housing instead of extending beyond it. It should visually disappear into the physical notch; prompts and active states provide the expansion and controls.
+The idle surface matches the measured camera housing instead of extending beyond it. It should visually disappear into the physical notch; prompts and active states provide the expansion and controls. A Mac without that housing has nothing for it to disappear into, so the idle surface alone is optional: switched off, the overlay stays off screen until a state needs it and shrinks back into the notch on its way out. Every other state is unchanged.
 
 ### Meeting prompt
 

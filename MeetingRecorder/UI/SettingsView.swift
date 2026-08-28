@@ -66,6 +66,13 @@ private struct GeneralSettingsPane: View {
             }
 
             Section {
+                Toggle("Rest at the camera notch when idle", isOn: $settings.showsIdleNotchBar)
+                Text("The idle bar is sized to disappear into the camera housing. On a Mac without a notch it shows as a dark bar across the middle of the menu bar — turn it off and the overlay stays hidden until there is something to show. Prompts, recording controls, and status appear the same either way.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            Section {
                 Picker("Microphone", selection: $settings.microphoneID) {
                     Text("System default").tag("")
                     ForEach(microphones) { microphone in

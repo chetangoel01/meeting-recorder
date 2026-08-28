@@ -13,6 +13,7 @@ final class AppSettings: ObservableObject {
         static let analysisModel = "analysisModel"
         static let analysisPrompt = "analysisPrompt"
         static let obsidianVaultPath = "obsidianVaultPath"
+        static let showsIdleNotchBar = "showsIdleNotchBar"
     }
 
     @Published var launchAtLogin: Bool {
@@ -59,6 +60,14 @@ final class AppSettings: ObservableObject {
         didSet { defaults.set(obsidianVaultPath, forKey: Key.obsidianVaultPath) }
     }
 
+    // The idle surface exists only to disappear into a physical camera
+    // housing; a Mac without one draws it as a dark bar across the middle of
+    // the menu bar. Switching it off leaves every active state untouched — the
+    // overlay still expands at the notch, it just stops resting there.
+    @Published var showsIdleNotchBar: Bool {
+        didSet { defaults.set(showsIdleNotchBar, forKey: Key.showsIdleNotchBar) }
+    }
+
     static let transcriptionLanguages: [(code: String, name: String)] = [
         ("", "Auto-detect"),
         ("en", "English"), ("es", "Spanish"), ("fr", "French"), ("de", "German"),
@@ -85,5 +94,6 @@ final class AppSettings: ObservableObject {
         analysisModel = defaults.string(forKey: Key.analysisModel) ?? "deepseek/deepseek-v4-pro"
         analysisPrompt = defaults.string(forKey: Key.analysisPrompt) ?? AnalysisClient.defaultInstructions
         obsidianVaultPath = defaults.string(forKey: Key.obsidianVaultPath) ?? ""
+        showsIdleNotchBar = defaults.object(forKey: Key.showsIdleNotchBar) as? Bool ?? true
     }
 }

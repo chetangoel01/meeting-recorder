@@ -38,6 +38,7 @@
 		C5A5833E82AD27E5E43499DC /* AACEncodingSettingsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 61D2EA01DD1F395655ED611B /* AACEncodingSettingsTests.swift */; };
 		C8774B842EA23CA86C3061CA /* AppSettingsMicrophoneTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1A13BEB07263DE61CAEF2FFD /* AppSettingsMicrophoneTests.swift */; };
 		E43BB5E434D1A400555575E2 /* NotchView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 813BB237AFCAEF21A7D53535 /* NotchView.swift */; };
+		E5631301E8D31356BD663F68 /* IdleNotchBarTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 097136783245A44333392684 /* IdleNotchBarTests.swift */; };
 		E6A8565185FBF0B1FF53F7D8 /* MeetingActivityMonitor.swift in Sources */ = {isa = PBXBuildFile; fileRef = D65B479CCD65A43A89956B13 /* MeetingActivityMonitor.swift */; };
 		E910B45B95ADAD36440AEAD7 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DA0E9E88C8DA982A76521B00 /* SettingsView.swift */; };
 		EC72AC92392A0AB60F329CCE /* AnalysisOutcomeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7263A88BFA454E095EF340C7 /* AnalysisOutcomeTests.swift */; };
@@ -57,6 +58,7 @@
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
+		097136783245A44333392684 /* IdleNotchBarTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IdleNotchBarTests.swift; sourceTree = "<group>"; };
 		1A13BEB07263DE61CAEF2FFD /* AppSettingsMicrophoneTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppSettingsMicrophoneTests.swift; sourceTree = "<group>"; };
 		1CE0B053F636C8564079FA27 /* MeetingRecorder.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = MeetingRecorder.entitlements; sourceTree = "<group>"; };
 		2376D68BA7A20CDBDE7E584A /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
@@ -118,6 +120,7 @@
 				1A13BEB07263DE61CAEF2FFD /* AppSettingsMicrophoneTests.swift */,
 				7A8C2FD9CF489EA720896DFB /* AudioFormatCompatibilityTests.swift */,
 				B66F6DED41970E9C8EF963A6 /* CalendarMeetingMonitorTests.swift */,
+				097136783245A44333392684 /* IdleNotchBarTests.swift */,
 				A3633EE8FBDE4807AF0BADCB /* MeetingActivityRuleTests.swift */,
 				AA7DECDEB33B16CB1D985BA5 /* MeetingAppClassifierTests.swift */,
 				69D0A5DD1AD26889FF6E6413 /* MeetingOfferPolicyTests.swift */,
@@ -339,6 +342,7 @@
 				C8774B842EA23CA86C3061CA /* AppSettingsMicrophoneTests.swift in Sources */,
 				7894A5825597A673FE048D80 /* AudioFormatCompatibilityTests.swift in Sources */,
 				0D48ECCF9EFF2846D0792413 /* CalendarMeetingMonitorTests.swift in Sources */,
+				E5631301E8D31356BD663F68 /* IdleNotchBarTests.swift in Sources */,
 				3B47BF13FC04EBE4BC55173E /* MeetingActivityRuleTests.swift in Sources */,
 				2FD4404046B750C4DF9D6E4E /* MeetingAppClassifierTests.swift in Sources */,
 				6513B5E0CDA4D40750C6997D /* MeetingOfferPolicyTests.swift in Sources */,

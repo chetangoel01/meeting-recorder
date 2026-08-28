@@ -1,6 +1,6 @@
 # Meeting Recorder
 
-Meeting Recorder is a native macOS utility that detects meeting-client audio activity, records both sides of the call, and turns each meeting into an analyzed Markdown note: a speaker-attributed transcript plus an LLM-written summary, decisions, action items, and open questions, filed into folders. Its primary controls expand from the MacBook camera notch.
+Meeting Recorder is a native macOS utility that detects meeting-client audio activity, records both sides of the call, and turns each meeting into an analyzed Markdown note: a speaker-attributed transcript plus an LLM-written summary, decisions, action items, and open questions, filed into folders. Its primary controls expand from the MacBook camera notch, or from the same spot at the top of the screen on Macs without one.
 
 <p align="center">
   <img src="docs/screenshots/notch-prompt.png" width="560" alt="Notch prompt asking to record a detected Google Meet call"><br>
@@ -33,6 +33,7 @@ First launch: enter an [OpenRouter](https://openrouter.ai) API key in Settings, 
 - Optionally uses Google Meet, Zoom, Teams, Webex, and FaceTime calendar links as a backup prompt.
 - Displays Record, Stop, processing, completion, and recovery states around the camera notch.
 - Expands into narrow left and right wings around the physical notch instead of dropping a panel below it. Click the upward chevron during recording—or drag upward anywhere on the overlay—to tuck active controls away. Tucked mode keeps only the red recording light, microphone mute, and Stop; click the red light to restore the full controls. Processing states use a small handle.
+- Runs on Macs without a camera notch. Only the idle bar assumes one: **Rest at the camera notch when idle** in Settings turns it off, so nothing sits across the menu bar between meetings. Prompts, recording controls, processing, and error states are unchanged — they expand at the same place either way.
 - During recording, microphone and call-audio buttons independently include or exclude each source from the saved recording.
 - Captures system audio and microphone samples directly through ScreenCaptureKit, then writes independent two-minute M4A recovery chunks instead of relying on ScreenCaptureKit's recording-output wrapper.
 - Transcribes the microphone and call-audio tracks separately when both sides spoke, interleaving them into **Me** / **Them** blocks with timestamps at two-minute granularity. Near-silent chunks are dropped before upload so Whisper cannot hallucinate filler on them. Single-source recordings fall back to a plain combined transcript in eight-minute chunks.
