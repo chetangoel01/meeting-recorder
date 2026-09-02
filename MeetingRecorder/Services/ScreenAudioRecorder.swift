@@ -1,4 +1,5 @@
 import AppKit
+import AudioToolbox
 import AVFoundation
 import CoreGraphics
 import CoreMedia
@@ -345,6 +346,7 @@ final class ScreenAudioRecorder: NSObject, SCStreamDelegate {
                 }
                 stream = opened
                 captureOutput.resetStallClock()
+                captureOutput.clearWriterFailures()
                 try await captureOutput.waitForSamples(from: .system, timeout: 10)
                 microphoneAvailable = try await Self.awaitMicrophone(captureOutput, wanted: wantsMicrophone)
                 guard generation == sessionGeneration else { return }
@@ -478,13 +480,14 @@ final class ScreenAudioRecorder: NSObject, SCStreamDelegate {
         }
     }
 
-    // Every 2 s: writer errors are fatal (disk full, file system); a stalled
-    // call-audio feed means the stream is dead and gets restarted; a stalled
-    // microphone gets one restart (which re-resolves the device) and then
-    // degrades to call-audio-only, recovering automatically if samples return.
+    // Every 2 s: call-audio writer errors are fatal (disk full, file system);
+    // a stalled call-audio feed means the stream is dead and gets restarted;
+    // the microphone is handled by MicrophoneHealthPolicy — a stall or an
+    // unwritable segment gets a restart, then degrades to call-audio-only,
+    // recovering automatically once samples can be written again.
     private func startHealthMonitor(for captureOutput: SegmentedAudioCapture) {
         healthTask = Task { @MainActor [weak self, weak captureOutput] in
-            var microphoneRestartUsed = false
+            var microphonePolicy = MicrophoneHealthPolicy()
             while !Task.isCancelled {
                 do {
                     try await Task.sleep(for: .seconds(2))
@@ -503,21 +506,29 @@ final class ScreenAudioRecorder: NSObject, SCStreamDelegate {
                     continue
                 }
                 guard self.wantsMicrophone else { continue }
-                let microphoneStalled = captureOutput.isStalled(.microphone, maximumSilence: 8)
-                if self.microphoneAvailable, microphoneStalled {
-                    if !microphoneRestartUsed {
-                        microphoneRestartUsed = true
-                        await self.restartStream(reason: "microphone stopped arriving")
-                    } else {
-                        self.microphoneAvailable = false
-                        Self.logger.error("Microphone samples stopped; continuing with call audio only")
-                        self.publishWarning(.microphoneLost)
-                    }
-                } else if !self.microphoneAvailable, !microphoneStalled, captureOutput.hasReceived(.microphone) {
+                let writerFailure = captureOutput.writerFailure(for: .microphone)
+                let observation = MicrophoneHealthPolicy.Observation(
+                    available: self.microphoneAvailable,
+                    stalled: captureOutput.isStalled(.microphone, maximumSilence: 8),
+                    writerFailed: writerFailure != nil,
+                    hasReceivedSamples: captureOutput.hasReceived(.microphone),
+                    now: .now
+                )
+                let problem = writerFailure.map { "microphone segment could not be written: \($0.localizedDescription)" }
+                    ?? "microphone stopped arriving"
+                switch microphonePolicy.evaluate(observation) {
+                case .restart:
+                    await self.restartStream(reason: problem)
+                case .degrade:
+                    self.microphoneAvailable = false
+                    Self.logger.error("\(problem, privacy: .public); continuing with call audio only")
+                    self.publishWarning(.microphoneLost)
+                case .resume:
                     self.microphoneAvailable = true
-                    microphoneRestartUsed = false
                     Self.logger.info("Microphone samples resumed")
                     self.publishWarning(nil)
+                case .none:
+                    break
                 }
             }
         }
@@ -759,6 +770,8 @@ private struct CaptureFinishResult: @unchecked Sendable {
 }
 
 private final class SegmentedAudioCapture: NSObject, SCStreamOutput, @unchecked Sendable {
+    private static let logger = Logger(subsystem: "com.chetangoel.MeetingRecorder", category: "Capture")
+
     let sampleQueue = DispatchQueue(
         label: "MeetingRecorder.AudioSamples",
         qos: .userInitiated
@@ -769,11 +782,12 @@ private final class SegmentedAudioCapture: NSObject, SCStreamOutput, @unchecked 
     private let failureHandler: @Sendable (any Error) -> Void
     private let statusLock = NSLock()
     private var writers: [AudioSource: AudioSegmentWriter] = [:]
-    private var finalizers: [SegmentFinalizer] = []
+    private var finalizers: [(source: AudioSource, finalizer: SegmentFinalizer)] = []
     private var segmentCounts: [AudioSource: Int] = [:]
     private var receivedSources: Set<AudioSource> = []
     private var lastSampleDates: [AudioSource: Date] = [:]
     private var storedFailure: (any Error)?
+    private var writerFailures: [AudioSource: any Error] = [:]
     private var acceptingSamples = true
     private var includedSources = Set([AudioSource.system, .microphone])
 
@@ -800,13 +814,41 @@ private final class SegmentedAudioCapture: NSObject, SCStreamOutput, @unchecked 
             receivedSources.insert(source)
             lastSampleDates[source] = .now
         }
-        guard includedSources.contains(source) else { return }
+        guard includedSources.contains(source), !hasWriterFailure(source) else { return }
 
         do {
             try append(sampleBuffer, source: source)
         } catch {
-            reportFailure(error)
+            if source == .microphone {
+                microphoneWriterDidFail(error)
+            } else {
+                reportFailure(error)
+            }
         }
+    }
+
+    // The microphone is optional: a segment that cannot be written (an
+    // encoder rejecting the device's format, say) drops the microphone from
+    // this stream, not the recording. The health monitor sees the failure,
+    // restarts the stream once so the device is re-resolved, and degrades to
+    // call audio only if it fails again. Call-audio writer failures stay fatal.
+    private func microphoneWriterDidFail(_ error: any Error) {
+        writers[.microphone]?.cancel()
+        writers[.microphone] = nil
+        statusLock.withLock { writerFailures[.microphone] = error }
+        Self.logger.error("Microphone segment failed; dropping microphone until the stream restarts: \(error.localizedDescription, privacy: .public)")
+    }
+
+    func writerFailure(for source: AudioSource) -> (any Error)? {
+        statusLock.withLock { writerFailures[source] }
+    }
+
+    private func hasWriterFailure(_ source: AudioSource) -> Bool {
+        statusLock.withLock { writerFailures[source] != nil }
+    }
+
+    func clearWriterFailures() {
+        statusLock.withLock { writerFailures.removeAll() }
     }
 
     func setIncluded(_ included: Bool, source: AudioSource) {
@@ -863,11 +905,11 @@ private final class SegmentedAudioCapture: NSObject, SCStreamOutput, @unchecked 
     }
 
     func finish() async -> CaptureFinishResult {
-        let pendingFinalizers: [SegmentFinalizer] = await withCheckedContinuation { continuation in
+        let pendingFinalizers: [(source: AudioSource, finalizer: SegmentFinalizer)] = await withCheckedContinuation { continuation in
             sampleQueue.async { [self] in
                 acceptingSamples = false
-                for writer in writers.values {
-                    finalizers.append(writer.beginFinish())
+                for (source, writer) in writers {
+                    finalizers.append((source, writer.beginFinish()))
                 }
                 writers.removeAll()
                 continuation.resume(returning: finalizers)
@@ -876,10 +918,14 @@ private final class SegmentedAudioCapture: NSObject, SCStreamOutput, @unchecked 
 
         var segments: [AudioSegment] = []
         var finishFailure: (any Error)?
-        for finalizer in pendingFinalizers {
+        for (source, finalizer) in pendingFinalizers {
             switch await finalizer.wait() {
             case let .success(segment):
                 segments.append(segment)
+            case let .failure(error) where source == .microphone:
+                // Consistent with live capture: losing a microphone segment
+                // costs attribution for that stretch, never the recording.
+                Self.logger.error("Microphone segment could not be finalized: \(error.localizedDescription, privacy: .public)")
             case let .failure(error):
                 finishFailure = finishFailure ?? error
             }
@@ -909,7 +955,7 @@ private final class SegmentedAudioCapture: NSObject, SCStreamOutput, @unchecked 
         var writer = writers[source]
         if let current = writer,
            current.elapsed(at: presentationTime) >= segmentDuration || !current.accepts(sampleBuffer) {
-            finalizers.append(current.beginFinish())
+            finalizers.append((source, current.beginFinish()))
             writers[source] = nil
             writer = nil
         }
@@ -993,25 +1039,34 @@ private final class AudioSegmentWriter: @unchecked Sendable {
         let url = directory.appending(
             path: String(format: "%@-%04d.m4a", source.rawValue, index)
         )
-        let writer = try AVAssetWriter(url: url, fileType: .m4a)
         let channelCount = max(1, min(Int(streamDescription.mChannelsPerFrame), 2))
-        let outputSettings = AACEncodingSettings.outputSettings(
+        var outputSettings = AACEncodingSettings.outputSettings(
             sourceSampleRate: streamDescription.mSampleRate,
             channelCount: channelCount
         )
         Self.logger.info(
             "\(source.rawValue, privacy: .public) segment \(index, privacy: .public): source \(streamDescription.mSampleRate, privacy: .public) Hz x\(streamDescription.mChannelsPerFrame, privacy: .public) -> \(String(describing: outputSettings[AVSampleRateKey] ?? 0), privacy: .public) Hz x\(channelCount, privacy: .public) @ \(String(describing: outputSettings[AVEncoderBitRateKey] ?? 0), privacy: .public) bps"
         )
-        let input = AVAssetWriterInput(
-            mediaType: .audio,
-            outputSettings: outputSettings,
-            sourceFormatHint: formatDescription
-        )
-        input.expectsMediaDataInRealTime = true
-        guard writer.canAdd(input) else { throw RecordingError.couldNotCreateRecording }
-        writer.add(input)
-        guard writer.startWriting() else {
-            throw writer.error ?? RecordingError.couldNotCreateRecording
+        var (writer, input) = try Self.makeWriter(url: url, outputSettings: outputSettings, sourceFormat: formatDescription)
+        if !writer.startWriting() {
+            let failure = writer.error ?? RecordingError.couldNotCreateRecording
+            // The bitrate came from the encoder's own table, so a rejection
+            // here means that table moved under us (new macOS). A segment at
+            // the encoder's default bitrate beats a dead recording.
+            guard outputSettings[AVEncoderBitRateKey] != nil else {
+                try? FileManager.default.removeItem(at: url)
+                throw failure
+            }
+            Self.logger.error(
+                "\(source.rawValue, privacy: .public) segment \(index, privacy: .public) rejected \(String(describing: outputSettings[AVEncoderBitRateKey] ?? 0), privacy: .public) bps (\(failure.localizedDescription, privacy: .public)); retrying at the encoder default"
+            )
+            outputSettings[AVEncoderBitRateKey] = nil
+            try? FileManager.default.removeItem(at: url)
+            (writer, input) = try Self.makeWriter(url: url, outputSettings: outputSettings, sourceFormat: formatDescription)
+            guard writer.startWriting() else {
+                try? FileManager.default.removeItem(at: url)
+                throw writer.error ?? failure
+            }
         }
         writer.startSession(atSourceTime: startTime)
 
@@ -1019,6 +1074,23 @@ private final class AudioSegmentWriter: @unchecked Sendable {
         self.writer = writer
         self.input = input
         self.sourceFormat = formatDescription
+    }
+
+    private static func makeWriter(
+        url: URL,
+        outputSettings: [String: Any],
+        sourceFormat: CMFormatDescription
+    ) throws -> (AVAssetWriter, AVAssetWriterInput) {
+        let writer = try AVAssetWriter(url: url, fileType: .m4a)
+        let input = AVAssetWriterInput(
+            mediaType: .audio,
+            outputSettings: outputSettings,
+            sourceFormatHint: sourceFormat
+        )
+        input.expectsMediaDataInRealTime = true
+        guard writer.canAdd(input) else { throw RecordingError.couldNotCreateRecording }
+        writer.add(input)
+        return (writer, input)
     }
 
     // A writer is bound to the format of its first sample. Sample-rate
@@ -1058,8 +1130,11 @@ private final class AudioSegmentWriter: @unchecked Sendable {
         return finalizer
     }
 
+    // A cancelled segment must not survive on disk: crash recovery sweeps the
+    // work directory by filename and would try to merge the fragment.
     func cancel() {
         writer.cancelWriting()
+        try? FileManager.default.removeItem(at: segment.url)
     }
 }
 
@@ -1117,29 +1192,104 @@ private final class SegmentFinalizer: @unchecked Sendable {
 // MARK: - AAC encoding
 
 enum AACEncodingSettings {
-    // The AAC encoder rejects bitrates above roughly 3x the sample rate per
-    // channel with "Cannot Encode Media" (a 16 kHz USB webcam mic at 96 kbps
-    // fails; 48 kbps works), and AVAssetWriterInput raises an ObjC exception
-    // for sample rates AAC cannot encode at all (88.2/96 kHz interfaces).
-    // canApply(outputSettings:) reports true for both, so clamp up front.
-    // AVAssetWriter resamples when the output rate differs from the source.
+    // AAC only encodes at these sample rates; AVAssetWriterInput raises an
+    // ObjC exception for anything else (88.2/96 kHz interfaces) and
+    // canApply(outputSettings:) does not catch it. AVAssetWriter resamples
+    // when the output rate differs from the source.
     static let aacSampleRates: [Double] = [8000, 11025, 12000, 16000, 22050, 24000, 32000, 44100, 48000]
     static let preferredBitRate = 96_000
 
     static func outputSettings(sourceSampleRate: Double, channelCount: Int) -> [String: Any] {
         let sampleRate = aacSampleRates.contains(sourceSampleRate) ? sourceSampleRate : 48_000
-        let ceiling = Int(sampleRate) * 3 * channelCount
-        let bitRate = min(preferredBitRate, ceiling)
         var settings: [String: Any] = [
             AVFormatIDKey: kAudioFormatMPEG4AAC,
             AVSampleRateKey: sampleRate,
             AVNumberOfChannelsKey: channelCount,
         ]
-        // Below 16 kHz even modest bitrates are rejected; let the encoder choose.
-        if sampleRate >= 16_000 {
+        if let bitRate = bitRate(sampleRate: sampleRate, channelCount: channelCount) {
             settings[AVEncoderBitRateKey] = bitRate
         }
         return settings
+    }
+
+    // The encoder accepts only a per-rate, per-channel set of bitrates and
+    // fails startWriting with "Cannot Encode Media" for anything else (a
+    // 24 kHz mono Bluetooth microphone tops out at 64 kbps; a 16 kHz USB
+    // webcam at 48 kbps). canApply(outputSettings:) reports true regardless,
+    // so ask the encoder for its applicable set and take the highest entry
+    // at or below the preferred rate.
+    static func bitRate(sampleRate: Double, channelCount: Int) -> Int? {
+        if let applicable = applicableBitRates(sampleRate: sampleRate, channelCount: channelCount),
+           !applicable.isEmpty {
+            let fitting = applicable.compactMap { range -> Int? in
+                if range.contains(preferredBitRate) { return preferredBitRate }
+                return range.upperBound <= preferredBitRate ? range.upperBound : nil
+            }
+            return fitting.max() ?? applicable.map(\.lowerBound).min()
+        }
+        return fallbackBitRate(sampleRate: sampleRate, channelCount: channelCount)
+    }
+
+    // kAudioConverterApplicableEncodeBitRates for an AAC encoder at the given
+    // output format; nil when the encoder could not be asked.
+    static func applicableBitRates(sampleRate: Double, channelCount: Int) -> [ClosedRange<Int>]? {
+        let channels = UInt32(channelCount)
+        var input = AudioStreamBasicDescription(
+            mSampleRate: sampleRate,
+            mFormatID: kAudioFormatLinearPCM,
+            mFormatFlags: kAudioFormatFlagIsFloat | kAudioFormatFlagIsPacked,
+            mBytesPerPacket: 4 * channels,
+            mFramesPerPacket: 1,
+            mBytesPerFrame: 4 * channels,
+            mChannelsPerFrame: channels,
+            mBitsPerChannel: 32,
+            mReserved: 0
+        )
+        var output = AudioStreamBasicDescription(
+            mSampleRate: sampleRate,
+            mFormatID: kAudioFormatMPEG4AAC,
+            mFormatFlags: 0,
+            mBytesPerPacket: 0,
+            mFramesPerPacket: 1024,
+            mBytesPerFrame: 0,
+            mChannelsPerFrame: channels,
+            mBitsPerChannel: 0,
+            mReserved: 0
+        )
+        var converter: AudioConverterRef?
+        guard AudioConverterNew(&input, &output, &converter) == noErr, let converter else { return nil }
+        defer { AudioConverterDispose(converter) }
+
+        var size: UInt32 = 0
+        var writable: DarwinBoolean = false
+        guard AudioConverterGetPropertyInfo(
+            converter, kAudioConverterApplicableEncodeBitRates, &size, &writable
+        ) == noErr, size > 0 else { return nil }
+        var ranges = [AudioValueRange](
+            repeating: AudioValueRange(),
+            count: Int(size) / MemoryLayout<AudioValueRange>.stride
+        )
+        guard AudioConverterGetProperty(
+            converter, kAudioConverterApplicableEncodeBitRates, &size, &ranges
+        ) == noErr else { return nil }
+        // The property is zero-padded to a fixed length.
+        return ranges
+            .filter { $0.mMinimum > 0 }
+            .map { Int($0.mMinimum)...Int(max($0.mMinimum, $0.mMaximum)) }
+    }
+
+    // Ceilings measured against the AAC encoder on macOS 26/27, used only if
+    // the encoder cannot be queried. Below 16 kHz the encoder picks.
+    static func fallbackBitRate(sampleRate: Double, channelCount: Int) -> Int? {
+        guard sampleRate >= 16_000 else { return nil }
+        let monoCeiling: Int
+        switch sampleRate {
+        case ..<22_050: monoCeiling = 48_000
+        case ..<32_000: monoCeiling = 64_000
+        case ..<44_100: monoCeiling = 96_000
+        default: monoCeiling = 256_000
+        }
+        return min(preferredBitRate, monoCeiling * max(1, channelCount))
     }
 }
 

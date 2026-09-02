@@ -84,7 +84,7 @@ Audio and transcripts stay on this Mac except for audio chunks sent to OpenRoute
 - If OpenRouter or the network fails, the audio is retained and can be retried.
 - The notch does not enter Recording until both microphone and system-audio sample flow is verified. If either stream or the file writer stops during a meeting, recording stops with a visible error and keeps the completed audio chunks.
 - Before transcription, the saved media duration is checked against the visible recording timer. A silent early cutoff is reported as a failure instead of being uploaded as if it were complete.
-- New meeting detections replace old completion/error banners and are queued while saving or transcribing, so status UI cannot swallow the next meeting prompt.
+- New meeting detections replace an old completion banner and are queued while saving or transcribing, so status UI cannot swallow the next meeting prompt. A failure that still offers Retry holds the screen instead: the next meeting waits behind it until you choose Retry or Dismiss, because presenting over it would drop the only route back to that audio.
 - Calendar backup covers supported meeting links when a browser or native client has not yet opened its microphone. Calendar and audio detections for the same active call are coalesced instead of queuing a second prompt.
 - Calendar monitoring resumes when access is granted in System Settings, and unsaved EventKit entries are deduplicated so they cannot re-prompt every polling interval.
 - Manual recording is always available from the menu-bar item.

@@ -223,6 +223,7 @@ struct NotchView: View {
                             systemImage: "arrow.clockwise",
                             action: model.retryTranscription
                         )
+                        iconButton("Dismiss", systemImage: "xmark", action: model.dismissStatus)
                     } else {
                         actionButton("Dismiss", action: model.dismissStatus)
                     }

@@ -124,8 +124,15 @@ extension RecorderPhase {
         currentSession: RecordingSession?
     ) -> MeetingOfferAction {
         switch self {
-        case .idle, .completed, .failed:
+        case .idle, .completed, .failed(_, nil):
             return .present
+        // A failure still offering Retry holds the screen; the new meeting
+        // waits behind it. Presenting over it would replace the only route
+        // back to that audio, and starting the next recording would drop it.
+        case .failed where candidate.trigger == .calendar:
+            return .ignore
+        case .failed:
+            return .queue
         case let .prompt(existing)
             where existing.trigger == .calendar || candidate.trigger == .calendar:
             return .ignore

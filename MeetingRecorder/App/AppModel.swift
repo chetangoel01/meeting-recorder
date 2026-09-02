@@ -245,12 +245,10 @@ final class AppModel: ObservableObject {
             } catch {
                 currentAudioURL = currentAudioURL ?? recorder.recoverableURL
                 currentArtifacts = currentArtifacts ?? recorder.lastArtifacts
-                presentPendingCandidateOr(
-                    .failed(
+                phase = .failed(
                         message: error.localizedDescription,
                         audioURL: currentAudioURL
                     )
-                )
             }
         }
     }
@@ -300,9 +298,7 @@ final class AppModel: ObservableObject {
             do {
                 try await processRecording(artifacts: artifacts, session: session)
             } catch {
-                presentPendingCandidateOr(
-                    .failed(message: error.localizedDescription, audioURL: artifacts.combinedURL)
-                )
+                phase = .failed(message: error.localizedDescription, audioURL: artifacts.combinedURL)
             }
         }
     }
@@ -446,9 +442,7 @@ final class AppModel: ObservableObject {
                     apiKey: KeychainStore.loadAPIKey()
                 )
             } catch {
-                presentPendingCandidateOr(
-                    .failed(message: error.localizedDescription, audioURL: nil)
-                )
+                phase = .failed(message: error.localizedDescription, audioURL: nil)
             }
         }
     }
@@ -481,9 +475,7 @@ final class AppModel: ObservableObject {
                 currentArtifacts = artifacts
                 try await processRecording(artifacts: artifacts, session: session)
             } catch {
-                presentPendingCandidateOr(
-                    .failed(message: error.localizedDescription, audioURL: currentAudioURL)
-                )
+                phase = .failed(message: error.localizedDescription, audioURL: currentAudioURL)
             }
         }
     }
@@ -695,9 +687,7 @@ final class AppModel: ObservableObject {
             currentArtifacts = recovered.artifacts
             try await processRecording(artifacts: recovered.artifacts, session: session)
         } catch {
-            presentPendingCandidateOr(
-                .failed(message: error.localizedDescription, audioURL: currentAudioURL)
-            )
+            phase = .failed(message: error.localizedDescription, audioURL: currentAudioURL)
         }
     }
 
@@ -714,9 +704,7 @@ final class AppModel: ObservableObject {
                 currentArtifacts = nil
                 phase = .recording(session)
             } catch {
-                presentPendingCandidateOr(
-                    .failed(message: error.localizedDescription, audioURL: recorder.recoverableURL)
-                )
+                phase = .failed(message: error.localizedDescription, audioURL: recorder.recoverableURL)
             }
         }
     }
@@ -872,15 +860,11 @@ final class AppModel: ObservableObject {
                 let artifacts = try await recorder.stop(expectedDuration: expectedDuration)
                 currentAudioURL = artifacts.combinedURL
                 currentArtifacts = artifacts
-                presentPendingCandidateOr(
-                    .failed(message: error.localizedDescription, audioURL: artifacts.combinedURL)
-                )
+                phase = .failed(message: error.localizedDescription, audioURL: artifacts.combinedURL)
             } catch {
                 currentAudioURL = recorder.recoverableURL
                 currentArtifacts = recorder.lastArtifacts
-                presentPendingCandidateOr(
-                    .failed(message: error.localizedDescription, audioURL: currentAudioURL)
-                )
+                phase = .failed(message: error.localizedDescription, audioURL: currentAudioURL)
             }
         }
     }

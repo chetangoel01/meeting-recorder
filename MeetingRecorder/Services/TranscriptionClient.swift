@@ -42,13 +42,22 @@ enum TranscriptionError: LocalizedError {
 struct TranscriptionClient: Sendable {
     private let session: URLSession
     private let endpoint = URL(string: "https://openrouter.ai/api/v1/audio/transcriptions")!
-    private let singleTrackChunkDuration: TimeInterval = 8 * 60
+    private let singleTrackChunkDuration: TimeInterval
+    private let trackChunkDuration: TimeInterval
+    private let retryDelays: [UInt64]
+
     // Speaker turns interleave at chunk granularity, so per-source tracks use
     // short chunks; the combined fallback keeps long ones to reduce requests.
-    private let trackChunkDuration: TimeInterval = 2 * 60
-
-    init(session: URLSession = .shared) {
+    init(
+        session: URLSession = .shared,
+        singleTrackChunkDuration: TimeInterval = 8 * 60,
+        trackChunkDuration: TimeInterval = 2 * 60,
+        retryDelays: [UInt64] = [0, 2, 5]
+    ) {
         self.session = session
+        self.singleTrackChunkDuration = singleTrackChunkDuration
+        self.trackChunkDuration = trackChunkDuration
+        self.retryDelays = retryDelays
     }
 
     func transcribe(
@@ -64,16 +73,23 @@ struct TranscriptionClient: Sendable {
         var transcriptParts: [String] = []
         var totalCost: Double = 0
         var receivedCost = false
+        var failures = ChunkFailures()
 
         for (index, chunk) in chunks.enumerated() {
-            let result = try await transcribeChunk(chunk.url, apiKey: apiKey, model: model, language: language)
-            transcriptParts.append(result.text)
-            if let cost = result.cost {
-                totalCost += cost
-                receivedCost = true
+            do {
+                let result = try await transcribeChunk(chunk.url, apiKey: apiKey, model: model, language: language)
+                transcriptParts.append(result.text)
+                if let cost = result.cost {
+                    totalCost += cost
+                    receivedCost = true
+                }
+            } catch {
+                try failures.record(error)
+                transcriptParts.append(Self.failureMarker(for: chunk, error: error))
             }
             await progress(Double(index + 1) / Double(chunks.count))
         }
+        try failures.throwIfNothingTranscribed(chunkCount: chunks.count)
 
         let text = transcriptParts.joined(separator: "\n\n").trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { throw TranscriptionError.emptyTranscript }
@@ -109,18 +125,26 @@ struct TranscriptionClient: Sendable {
         var completed = 0
         var totalCost: Double = 0
         var receivedCost = false
+        var failures = ChunkFailures()
 
         func transcribeAll(_ chunks: [AudioChunk]) async throws -> [TimedTranscriptChunk] {
             var results: [TimedTranscriptChunk] = []
             for chunk in chunks {
-                let result = try await transcribeChunk(chunk.url, apiKey: apiKey, model: model, language: language)
-                let text = result.text.trimmingCharacters(in: .whitespacesAndNewlines)
-                if !text.isEmpty {
-                    results.append(TimedTranscriptChunk(offset: chunk.offset, text: text))
-                }
-                if let cost = result.cost {
-                    totalCost += cost
-                    receivedCost = true
+                do {
+                    let result = try await transcribeChunk(chunk.url, apiKey: apiKey, model: model, language: language)
+                    let text = result.text.trimmingCharacters(in: .whitespacesAndNewlines)
+                    if !text.isEmpty {
+                        results.append(TimedTranscriptChunk(offset: chunk.offset, text: text))
+                    }
+                    if let cost = result.cost {
+                        totalCost += cost
+                        receivedCost = true
+                    }
+                } catch {
+                    try failures.record(error)
+                    results.append(
+                        TimedTranscriptChunk(offset: chunk.offset, text: Self.failureMarker(for: chunk, error: error))
+                    )
                 }
                 completed += 1
                 let fraction = Double(completed) / Double(total)
@@ -131,6 +155,7 @@ struct TranscriptionClient: Sendable {
 
         let me = try await transcribeAll(audibleMicrophone)
         let them = try await transcribeAll(audibleSystem)
+        try failures.throwIfNothingTranscribed(chunkCount: total)
         return DualTrackTranscription(me: me, them: them, cost: receivedCost ? totalCost : nil)
     }
 
@@ -152,7 +177,7 @@ struct TranscriptionClient: Sendable {
 
         var lastError: (any Error)?
         var verbose = true
-        for delay in [UInt64(0), 2, 5] {
+        for delay in retryDelays {
             if delay > 0 { try await Task.sleep(for: .seconds(delay)) }
             let requestBody = RequestBody(
                 model: model,
@@ -204,7 +229,37 @@ struct TranscriptionClient: Sendable {
 
     private struct AudioChunk: Sendable {
         let offset: TimeInterval
+        let duration: TimeInterval
         let url: URL
+    }
+
+    // A chunk that still fails after its retries is recorded in the transcript
+    // where its words would have been, and the rest of the meeting goes on:
+    // the other chunks are already paid for and the audio is kept, so failing
+    // the whole run would only re-buy them on Retry. Two things still fail
+    // outright: an auth rejection, which no later chunk will get past, and a
+    // run in which nothing at all transcribed, which has nothing worth saving.
+    private struct ChunkFailures {
+        private(set) var count = 0
+        private var lastError: (any Error)?
+
+        mutating func record(_ error: any Error) throws {
+            if case let TranscriptionError.server(status, _) = error, status == 401 || status == 402 {
+                throw error
+            }
+            count += 1
+            lastError = error
+        }
+
+        func throwIfNothingTranscribed(chunkCount: Int) throws {
+            if count > 0, count == chunkCount, let lastError { throw lastError }
+        }
+    }
+
+    private static func failureMarker(for chunk: AudioChunk, error: any Error) -> String {
+        let start = TrackTranscriptBuilder.timestamp(chunk.offset)
+        let end = TrackTranscriptBuilder.timestamp(chunk.offset + chunk.duration)
+        return "_[Transcription failed for \(start)–\(end): \(error.localizedDescription)]_"
     }
 
     private func splitIntoChunks(_ url: URL, chunkDuration: TimeInterval) async throws -> [AudioChunk] {
@@ -213,7 +268,7 @@ struct TranscriptionClient: Sendable {
         // Imported files can be mp3/wav/etc.; every uploaded chunk is m4a, so
         // short non-m4a sources fall through to the export loop (one pass).
         guard duration > chunkDuration || url.pathExtension.lowercased() != "m4a" else {
-            return [AudioChunk(offset: 0, url: url)]
+            return [AudioChunk(offset: 0, duration: duration, url: url)]
         }
 
         var chunks: [AudioChunk] = []
@@ -231,7 +286,7 @@ struct TranscriptionClient: Sendable {
             )
             do {
                 try await exporter.export(to: outputURL, as: .m4a)
-                chunks.append(AudioChunk(offset: offset, url: outputURL))
+                chunks.append(AudioChunk(offset: offset, duration: remaining, url: outputURL))
             } catch {
                 cleanUp(chunks, source: url)
                 throw TranscriptionError.couldNotSplitAudio

@@ -72,3 +72,31 @@ final class MeetingOfferPolicyTests: XCTestCase {
         )
     }
 }
+
+extension MeetingOfferPolicyTests {
+    private var retryableFailure: RecorderPhase {
+        .failed(message: "OpenRouter returned 503", audioURL: URL(filePath: "/tmp/meeting.m4a"))
+    }
+
+    func testFailureStillOfferingRetryQueuesTheNextMeeting() {
+        let browserMeeting = MeetingCandidate(
+            id: "browser:arc",
+            appName: "Arc",
+            bundleIdentifier: "company.thebrowser.Browser",
+            processIdentifier: nil,
+            trigger: .browser
+        )
+        XCTAssertEqual(retryableFailure.offerAction(for: browserMeeting, currentSession: nil), .queue)
+    }
+
+    func testFailureStillOfferingRetryIgnoresCalendarCandidates() {
+        let calendarMeeting = MeetingCandidate(
+            id: "calendar:weekly-sync",
+            appName: "Weekly sync",
+            bundleIdentifier: nil,
+            processIdentifier: nil,
+            trigger: .calendar
+        )
+        XCTAssertEqual(retryableFailure.offerAction(for: calendarMeeting, currentSession: nil), .ignore)
+    }
+}
